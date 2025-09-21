@@ -36,30 +36,7 @@ Reread supervisor:
 sudo supervisorctl reread && sudo supervisorctl update
 ```
 
-Nginx config for callbacks:
-
-```
-server {
-    listen 1888 ssl;
-    server_name domain1.com;
-
-    ssl_certificate /etc/letsencrypt/live/domain1.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/domain1.com/privkey.pem;
-
-    location / {
-        proxy_pass http://localhost:6666;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-MerchantId $http_x_merchantId;
-        proxy_set_header X-ApiKey $http_x_apiKey;
-        proxy_set_header X-Secret $http_x_secret;
-    }
-}
-```
-
-nginx conf for tg webhook:
+Nginx conf for tg webhook:
 
 ```
 server {
@@ -70,7 +47,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/domain1.com/privkey.pem;
 
     location /tg/wh {
-        proxy_pass http://127.0.0.1:6677;
+        proxy_pass http://127.0.0.1:6688;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }

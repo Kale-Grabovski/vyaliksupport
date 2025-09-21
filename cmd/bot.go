@@ -7,8 +7,8 @@ import (
 	"strings"
 	"syscall"
 
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
@@ -16,7 +16,7 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"vyaliksupport/internal/config"
-	"vyaliksupport/pkg/db/mysql"
+	"vyaliksupport/pkg/db/postgres"
 )
 
 var botCmd = &cobra.Command{
@@ -45,7 +45,7 @@ var botCmd = &cobra.Command{
 			return
 		}
 
-		reqRepo := mysql.NewReq(db)
+		reqRepo := postgres.NewReq(db)
 		err = reqRepo.Migrate()
 		if err != nil {
 			lg.Error("can't migrate", zap.Error(err))
