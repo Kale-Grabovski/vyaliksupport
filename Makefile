@@ -6,4 +6,4 @@ build:
 upload:
 	make build && rsync -av support vpn@vpnnl1:~/support/ && \
 	ssh vpn@vpnnl1 sudo supervisorctl restart support && \
-	rm bot
+	rm support

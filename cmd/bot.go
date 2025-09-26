@@ -88,6 +88,13 @@ var botCmd = &cobra.Command{
 					lg.Error("can't save message", zap.String("msg", msg.Text), zap.Error(err))
 				}
 
+				//go func() {
+				//	notice := fmt.Sprintf("New message from user %d/%s\n%s", msg.Chat.ID, msg.Chat.Username, msg)
+				//	_, err = tb.Send(telebot.ChatID(cfg.Bot.NoticeChanID), notice)
+				//	if err != nil {
+				//		lg.Error("cannot send notice: %v", zap.Error(err))
+				//	}
+				//}()
 				return c.Send("✅ Сообщение поддержке отправлено")
 			}
 
