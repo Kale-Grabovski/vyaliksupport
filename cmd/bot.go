@@ -54,6 +54,8 @@ var botCmd = &cobra.Command{
 
 		tb.Handle(telebot.OnText, func(c telebot.Context) error {
 			msg := c.Message()
+
+			// Reply on message => sending to user
 			if msg.Chat.ID == cfg.Bot.GroupID && msg.ReplyTo != nil {
 				repliedMsgID := msg.ReplyTo.ID
 
@@ -76,7 +78,11 @@ var botCmd = &cobra.Command{
 				return c.Send("Отправьте ваш вопрос одним сообщением")
 			}
 
+			// Message to group
 			if msg.Chat.ID != cfg.Bot.GroupID {
+				msgPrev := fmt.Sprintf("💬 Новое сообщение от пользователя #%d", msg.Chat.ID)
+				tb.Send(telebot.ChatID(cfg.Bot.GroupID), msgPrev)
+
 				forwardedMsg, err := tb.Forward(telebot.ChatID(cfg.Bot.GroupID), msg)
 				if err != nil {
 					lg.Error("can't forward message", zap.Error(err))
