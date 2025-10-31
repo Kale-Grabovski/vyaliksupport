@@ -3,7 +3,7 @@ package config
 import (
 	"time"
 
-	"gopkg.in/telebot.v3"
+	"gopkg.in/telebot.v4"
 )
 
 type Config struct {

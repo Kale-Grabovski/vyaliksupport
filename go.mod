@@ -8,7 +8,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.13.0
 	go.uber.org/zap v1.17.0
-	gopkg.in/telebot.v3 v3.3.8
+	gopkg.in/telebot.v4 v4.0.0-beta.5
 )
 
 require (

@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"gopkg.in/telebot.v3"
+	"gopkg.in/telebot.v4"
 
 	"vyaliksupport/internal/config"
 	"vyaliksupport/pkg/db/postgres"
@@ -52,7 +52,7 @@ var botCmd = &cobra.Command{
 			return
 		}
 
-		tb.Handle(telebot.OnText, func(c telebot.Context) error {
+		handleMessage := func(c telebot.Context) error {
 			msg := c.Message()
 
 			// Reply on message => sending to user
@@ -64,13 +64,54 @@ var botCmd = &cobra.Command{
 					return c.Send("❌ Не могу найти ваш запрос")
 				}
 
-				_, err = tb.Send(telebot.ChatID(userChatID), "👨‍💻 *Ответ из поддержки:*\n"+msg.Text, &telebot.SendOptions{
-					ParseMode: telebot.ModeMarkdown,
-				})
+				// 1st message
+				_, err = tb.Send(telebot.ChatID(userChatID), "👨‍💻 Ответ из поддержки:")
 				if err != nil {
 					lg.Error("can't send response to user", zap.Int64("userChatID", userChatID), zap.Error(err))
 					return c.Send("❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
 				}
+
+				// 2nd message
+				switch {
+				case msg.Text != "":
+					_, err = tb.Send(telebot.ChatID(userChatID), msg.Text, &telebot.SendOptions{
+						ParseMode: telebot.ModeMarkdown,
+					})
+
+				case msg.Photo != nil:
+					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Photo{
+						File:    msg.Photo.File,
+						Caption: msg.Caption,
+					})
+				case msg.Video != nil:
+					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Video{
+						File:    msg.Video.File,
+						Caption: msg.Caption,
+					})
+				case msg.Document != nil:
+					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Document{
+						File:     msg.Document.File,
+						Caption:  msg.Caption,
+						FileName: msg.Document.FileName,
+					})
+				case msg.Sticker != nil:
+					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Sticker{
+						File: msg.Sticker.File,
+					})
+				case msg.Audio != nil:
+					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Audio{
+						File:    msg.Audio.File,
+						Caption: msg.Caption,
+					})
+				default:
+					_, err = tb.Send(telebot.ChatID(userChatID), "📎 [Неподдерживаемый тип сообщения]")
+				}
+
+				if err != nil {
+					lg.Error("can't send response to user", zap.Int64("userChatID", userChatID), zap.Error(err))
+					return c.Send("❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
+				}
+
 				return c.Send("✅ Ответ отправлен пользователю.")
 			}
 
@@ -105,7 +146,16 @@ var botCmd = &cobra.Command{
 			}
 
 			return nil
-		})
+		}
+
+		tb.Handle(telebot.OnText, handleMessage)
+		tb.Handle(telebot.OnPhoto, handleMessage)
+		tb.Handle(telebot.OnVideo, handleMessage)
+		tb.Handle(telebot.OnDocument, handleMessage)
+		tb.Handle(telebot.OnSticker, handleMessage)
+		tb.Handle(telebot.OnAudio, handleMessage)
+		tb.Handle(telebot.OnVoice, handleMessage)
+		tb.Handle(telebot.OnAnimation, handleMessage)
 
 		go tb.Start()
 
