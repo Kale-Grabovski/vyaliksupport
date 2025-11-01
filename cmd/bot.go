@@ -61,14 +61,22 @@ var botCmd = &cobra.Command{
 
 				userChatID, err := reqRepo.FindUserChatID(repliedMsgID)
 				if err != nil {
-					return c.Send("❌ Не могу найти ваш запрос")
+					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "❌ Не могу найти ваш запрос")
+					if sendErr != nil {
+						lg.Error("can't send error message to group", zap.Error(sendErr))
+					}
+					return nil
 				}
 
 				// 1st message
 				_, err = tb.Send(telebot.ChatID(userChatID), "👨‍💻 Ответ из поддержки:")
 				if err != nil {
 					lg.Error("can't send response to user", zap.Int64("userChatID", userChatID), zap.Error(err))
-					return c.Send("❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
+					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
+					if sendErr != nil {
+						lg.Error("can't send error message to group", zap.Error(sendErr))
+					}
+					return nil
 				}
 
 				// 2nd message
@@ -104,15 +112,27 @@ var botCmd = &cobra.Command{
 						Caption: msg.Caption,
 					})
 				default:
-					_, err = tb.Send(telebot.ChatID(userChatID), "📎 [Неподдерживаемый тип сообщения]")
+					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "📎 [Неподдерживаемый тип сообщения]")
+					if sendErr != nil {
+						lg.Error("can't send error message to group", zap.Error(sendErr))
+					}
+					return nil
 				}
 
 				if err != nil {
 					lg.Error("can't send response to user", zap.Int64("userChatID", userChatID), zap.Error(err))
-					return c.Send("❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
+					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
+					if sendErr != nil {
+						lg.Error("can't send error message to group", zap.Error(sendErr))
+					}
+					return nil
 				}
 
-				return c.Send("✅ Ответ отправлен пользователю.")
+				_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "✅ Ответ отправлен пользователю.")
+				if sendErr != nil {
+					lg.Error("can't send confirmation to group", zap.Error(sendErr))
+				}
+				return nil
 			}
 
 			if msg.Text == "/start" {
