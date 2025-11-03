@@ -141,8 +141,10 @@ var botCmd = &cobra.Command{
 
 			// Message to group
 			if msg.Chat.ID != cfg.Bot.GroupID {
-				msgPrev := fmt.Sprintf("💬 Новое сообщение от пользователя #%d", msg.Chat.ID)
-				tb.Send(telebot.ChatID(cfg.Bot.GroupID), msgPrev)
+				msgPrev := fmt.Sprintf("💬 Новое сообщение от пользователя `%d`", msg.Chat.ID)
+				tb.Send(telebot.ChatID(cfg.Bot.GroupID), msgPrev, &telebot.SendOptions{
+					ParseMode: telebot.ModeMarkdown,
+				})
 
 				forwardedMsg, err := tb.Forward(telebot.ChatID(cfg.Bot.GroupID), msg)
 				if err != nil {
