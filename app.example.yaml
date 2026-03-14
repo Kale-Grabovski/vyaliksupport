@@ -1,6 +1,7 @@
 bot:
   token: 3242342434:34234324324
   group_id: -10033333333
+  sub_host: https://sub.example.com  # base URL for subscription links
     #webhook:
     #url: https://domain.com/tg/wh
   #listen: 6688

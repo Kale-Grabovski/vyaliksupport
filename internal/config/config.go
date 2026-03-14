@@ -15,6 +15,7 @@ type Bot struct {
 	Token        string   `mapstructure:"token"`
 	GroupID      int64    `mapstructure:"group_id"`
 	NoticeChanID int64    `mapstructure:"notice_channel"`
+	SubHost      string   `mapstructure:"sub_host"`
 	Webhook      *Webhook `mapstructure:"webhook"`
 }
 

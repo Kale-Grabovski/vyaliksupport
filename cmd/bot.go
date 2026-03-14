@@ -45,7 +45,7 @@ var botCmd = &cobra.Command{
 			return
 		}
 
-		reqRepo := postgres.NewReq(db)
+		reqRepo := postgres.NewReq(db, cfg.Bot.SubHost)
 		err = reqRepo.Migrate()
 		if err != nil {
 			lg.Error("can't migrate", zap.Error(err))
@@ -141,10 +141,21 @@ var botCmd = &cobra.Command{
 
 			// Message to group
 			if msg.Chat.ID != cfg.Bot.GroupID {
-				msgPrev := fmt.Sprintf("💬 Новое сообщение от пользователя `%d`", msg.Chat.ID)
-				tb.Send(telebot.ChatID(cfg.Bot.GroupID), msgPrev, &telebot.SendOptions{
-					ParseMode: telebot.ModeMarkdown,
-				})
+				// Send user summary card before the forwarded message.
+				summary, err := reqRepo.GetUserSummary(msg.Chat.ID)
+				if err != nil {
+					lg.Warn("can't get user summary", zap.Int64("tg_id", msg.Chat.ID), zap.Error(err))
+					// Fall back to plain header so the message still gets forwarded.
+					tb.Send(telebot.ChatID(cfg.Bot.GroupID),
+						fmt.Sprintf("💬 Новое сообщение от `%d`", msg.Chat.ID),
+						&telebot.SendOptions{ParseMode: telebot.ModeMarkdown},
+					)
+				} else {
+					tb.Send(telebot.ChatID(cfg.Bot.GroupID),
+						"💬 *Новое обращение*\n\n"+summary.Format(),
+						&telebot.SendOptions{ParseMode: telebot.ModeMarkdown},
+					)
+				}
 
 				forwardedMsg, err := tb.Forward(telebot.ChatID(cfg.Bot.GroupID), msg)
 				if err != nil {
