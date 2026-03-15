@@ -42,7 +42,14 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 			u.balance,
 			u.used_test,
 			count(p.id) AS pay_count,
-			coalesce(sum(p.paid_amount), 0) AS pay_sum
+			coalesce(sum(p.paid_amount), 0) AS pay_sum,
+			coalesce((
+				SELECT tx_id
+				FROM tg_payments
+				WHERE tg_id = $1 AND status = 'ok' AND payment_system = 'platega'
+				ORDER BY created_at DESC
+				LIMIT 1
+			), '') AS last_tx_id
 		FROM tg_users AS u
 		LEFT JOIN tg_payments AS p
 			ON p.tg_id = u.tg_id AND p.status = 'ok' AND p.paid_amount > 0
@@ -50,7 +57,7 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 		GROUP BY u.username, u.created_at, u.balance, u.used_test
 	`, tgID)
 
-	err := row.Scan(&s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest, &s.PayCount, &s.PaySum)
+	err := row.Scan(&s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest, &s.PayCount, &s.PaySum, &s.LastTxID)
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}

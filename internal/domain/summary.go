@@ -16,6 +16,7 @@ type UserSummary struct {
 	PaySum    int
 	SubName   string
 	SubKey    string // full subscription URL
+	LastTxID  string
 	SubExpire time.Time
 }
 
@@ -36,11 +37,17 @@ func (s *UserSummary) Format() string {
 		sub = fmt.Sprintf("до %s\n`%s`", s.SubExpire.Format("02.01.2006"), s.SubKey)
 	}
 
+	last := ""
+	if s.LastTxID != "" {
+		last = "💶 Последний платеж: " + s.LastTxID + "\n"
+	}
+
 	return fmt.Sprintf(
 		"👤 *%s* | `%d`\n"+
 			"📅 С нами с: %s\n"+
 			"💰 Баланс: *%d₽*\n"+
 			"💳 Оплат: *%d* на сумму *%d₽*\n"+
+			last+
 			"🎁 Пробный: %s\n"+
 			"🔐 Подписка: %s",
 		username,

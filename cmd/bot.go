@@ -143,19 +143,16 @@ var botCmd = &cobra.Command{
 			if msg.Chat.ID != cfg.Bot.GroupID {
 				// Send user summary card before the forwarded message.
 				summary, err := reqRepo.GetUserSummary(msg.Chat.ID)
+				var textMsg string
 				if err != nil {
-					lg.Warn("can't get user summary", zap.Int64("tg_id", msg.Chat.ID), zap.Error(err))
+					lg.Error("can't get user summary", zap.Int64("tg_id", msg.Chat.ID), zap.Error(err))
+
 					// Fall back to plain header so the message still gets forwarded.
-					tb.Send(telebot.ChatID(cfg.Bot.GroupID),
-						fmt.Sprintf("💬 Новое сообщение от `%d`", msg.Chat.ID),
-						&telebot.SendOptions{ParseMode: telebot.ModeMarkdown},
-					)
+					textMsg = fmt.Sprintf("💬 Новое сообщение от `%d`", msg.Chat.ID)
 				} else {
-					tb.Send(telebot.ChatID(cfg.Bot.GroupID),
-						"💬 *Новое обращение*\n\n"+summary.Format(),
-						&telebot.SendOptions{ParseMode: telebot.ModeMarkdown},
-					)
+					textMsg = "💬 *Новое обращение*\n\n" + summary.Format()
 				}
+				tb.Send(telebot.ChatID(cfg.Bot.GroupID), textMsg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
 
 				forwardedMsg, err := tb.Forward(telebot.ChatID(cfg.Bot.GroupID), msg)
 				if err != nil {
@@ -168,13 +165,6 @@ var botCmd = &cobra.Command{
 					lg.Error("can't save message", zap.String("msg", msg.Text), zap.Error(err))
 				}
 
-				//go func() {
-				//	notice := fmt.Sprintf("New message from user %d/%s\n%s", msg.Chat.ID, msg.Chat.Username, msg)
-				//	_, err = tb.Send(telebot.ChatID(cfg.Bot.NoticeChanID), notice)
-				//	if err != nil {
-				//		lg.Error("cannot send notice: %v", zap.Error(err))
-				//	}
-				//}()
 				return c.Send("✅ Сообщение поддержке отправлено")
 			}
 
