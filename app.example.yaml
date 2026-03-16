@@ -3,7 +3,7 @@ bot:
   group_id: -10033333333
     #webhook:
     #url: https://domain.com/tg/wh
-  #listen: 6677
+  #listen: 6688
 db:
-  dsn: user:pwd@tcp(127.0.0.1:3306)/db_name?parseTime=true
-  dialect: mysql
+  dsn: postgresql://user:pwd@127.0.0.1:5433/postgres?sslmode=disable
+  dialect: postgres

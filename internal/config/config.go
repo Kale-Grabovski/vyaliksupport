@@ -27,7 +27,7 @@ func (c Config) BotSettings() telebot.Settings {
 		return telebot.Settings{
 			Token: c.Bot.Token,
 			Poller: &telebot.Webhook{
-				Listen: ":" + c.Bot.Webhook.Listen,
+				Listen: "127.0.0.1:" + c.Bot.Webhook.Listen,
 				Endpoint: &telebot.WebhookEndpoint{
 					PublicURL: c.Bot.Webhook.URL,
 				},
