@@ -1,0 +1,9 @@
+bot:
+  token: 3242342434:34234324324
+  group_id: -10033333333
+    #webhook:
+    #url: https://domain.com/tg/wh
+  #listen: 6677
+db:
+  dsn: user:pwd@tcp(127.0.0.1:3306)/db_name?parseTime=true
+  dialect: mysql

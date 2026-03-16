@@ -1,0 +1,5 @@
+curl -X POST  https://criptonit1488.top:1888/callback/platega \
+-H 'Content-Type: application/json' \
+-H 'X-MerchantId: 87ebaee1-fe23-4514-91bb-66e3b21b36de' \
+-H 'X-ApiKey: Y4TVBhwPmeegULfpqrNkEKHtJxFLqrdjn8ukMDebANeqLnnEPtyrR0qCJGYX1jD8QDr0Dok814ugZwHXGJGjqVMuEVqgYCe5bIQd' \
+-d '{"id": "35b88203-459d-42b5-8f84-e6b2e15dff44","amount": 150, "currency": "RUB", "status": "success", "paymentMethod": 2 }'
