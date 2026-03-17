@@ -68,15 +68,12 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 	var expireAt sql.NullTime
 
 	err = d.db.QueryRow(`
-		SELECT short_uuid, username, expire_at
+		SELECT short_uuid, username, expire_at, expire_at < now()
 		FROM users
 		WHERE telegram_id = $1
-		  AND status = 'ACTIVE'
-		  AND expire_at > now()
-		  AND traffic_limit_bytes = 0
 		ORDER BY expire_at DESC
 		LIMIT 1
-	`, tgID).Scan(&shortUUID, &subName, &expireAt)
+	`, tgID).Scan(&shortUUID, &subName, &expireAt, &s.Expired)
 
 	if err == nil && shortUUID.Valid {
 		s.SubName = subName.String

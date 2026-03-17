@@ -12,6 +12,7 @@ type UserSummary struct {
 	JoinedAt  time.Time
 	Balance   int
 	UsedTest  bool
+	Expired   bool
 	PayCount  int
 	PaySum    int
 	SubName   string
@@ -32,14 +33,19 @@ func (s *UserSummary) Format() string {
 		usedTest = "да"
 	}
 
+	expired := "нет"
+	if s.Expired {
+		expired = "да"
+	}
+
 	sub := "нет"
 	if s.SubKey != "" {
-		sub = fmt.Sprintf("до %s\n`%s`", s.SubExpire.Format("02.01.2006"), s.SubKey)
+		sub = fmt.Sprintf("до %s, `%s`\n`%s`", s.SubExpire.Format("02.01.2006"), s.SubName, s.SubKey)
 	}
 
 	last := ""
 	if s.LastTxID != "" {
-		last = "💶 Последний платеж: " + s.LastTxID + "\n"
+		last = "💶 Платеж: " + s.LastTxID + "\n"
 	}
 
 	return fmt.Sprintf(
@@ -49,7 +55,8 @@ func (s *UserSummary) Format() string {
 			"💳 Оплат: *%d* на сумму *%d₽*\n"+
 			last+
 			"🎁 Пробный: %s\n"+
-			"🔐 Подписка: %s",
+			"🐷 Истекла: %s\n"+
+			"🔐 %s",
 		username,
 		s.TgID,
 		s.JoinedAt.Format("02.01.2006"),
@@ -57,6 +64,7 @@ func (s *UserSummary) Format() string {
 		s.PayCount,
 		s.PaySum,
 		usedTest,
+		expired,
 		sub,
 	)
 }
