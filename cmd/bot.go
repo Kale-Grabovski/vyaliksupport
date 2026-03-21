@@ -15,182 +15,61 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/telebot.v4"
 
+	"vyaliksupport/internal/bot"
 	"vyaliksupport/internal/config"
 	"vyaliksupport/pkg/db/postgres"
 )
 
 var botCmd = &cobra.Command{
-	Use: "support",
-	Run: func(cmd *cobra.Command, args []string) {
-		cfg, err := loadConfig(cfgFile)
-		if err != nil {
-			panic(err)
-		}
+	Use:  "support",
+	RunE: runBot,
+}
 
-		lgCfg := zap.NewProductionConfig()
-		lgCfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05")
-		lg, _ := lgCfg.Build()
-		defer lg.Sync()
+func runBot(cmd *cobra.Command, args []string) error {
+	cfg, err := loadConfig(cfgFile)
+	if err != nil {
+		return err
+	}
 
-		db, err := connectDB(cfg.DB.DSN, cfg.DB.Dialect)
-		if err != nil {
-			lg.Error("can't connect to DB: "+cfg.DB.DSN, zap.Error(err))
-			return
-		}
-		defer db.Close()
+	lgCfg := zap.NewProductionConfig()
+	lgCfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05")
+	lg, err := lgCfg.Build()
+	if err != nil {
+		return fmt.Errorf("failed to build logger: %w", err)
+	}
+	defer lg.Sync() //nolint:errcheck
 
-		tb, err := telebot.NewBot(cfg.BotSettings())
-		if err != nil {
-			lg.Error("can't init TG bot", zap.Error(err))
-			return
-		}
+	db, err := connectDB(cfg.DB.DSN, cfg.DB.Dialect)
+	if err != nil {
+		lg.Error("can't connect to DB", zap.String("dsn", cfg.DB.DSN), zap.Error(err))
+		return err
+	}
+	defer db.Close()
 
-		reqRepo := postgres.NewReq(db, cfg.Bot.SubHost)
-		err = reqRepo.Migrate()
-		if err != nil {
-			lg.Error("can't migrate", zap.Error(err))
-			return
-		}
+	tb, err := telebot.NewBot(cfg.BotSettings())
+	if err != nil {
+		lg.Error("can't init TG bot", zap.Error(err))
+		return err
+	}
 
-		handleMessage := func(c telebot.Context) error {
-			msg := c.Message()
+	repo := postgres.NewReq(db, cfg.Bot.SubHost)
+	if err = repo.Migrate(); err != nil {
+		lg.Error("can't migrate", zap.Error(err))
+		return err
+	}
 
-			// Reply on message => sending to user
-			if msg.Chat.ID == cfg.Bot.GroupID && msg.ReplyTo != nil {
-				repliedMsgID := msg.ReplyTo.ID
+	b := bot.New(tb, cfg, repo, lg)
 
-				userChatID, err := reqRepo.FindUserChatID(repliedMsgID)
-				if err != nil {
-					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "❌ Не могу найти ваш запрос")
-					if sendErr != nil {
-						lg.Error("can't send error message to group", zap.Error(sendErr))
-					}
-					return nil
-				}
+	go b.Start()
+	lg.Info("Bot started")
 
-				// 1st message
-				_, err = tb.Send(telebot.ChatID(userChatID), "👨‍💻 Ответ из поддержки:")
-				if err != nil {
-					lg.Error("can't send response to user", zap.Int64("userChatID", userChatID), zap.Error(err))
-					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
-					if sendErr != nil {
-						lg.Error("can't send error message to group", zap.Error(sendErr))
-					}
-					return nil
-				}
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
 
-				// 2nd message
-				switch {
-				case msg.Text != "":
-					_, err = tb.Send(telebot.ChatID(userChatID), msg.Text, &telebot.SendOptions{
-						ParseMode: telebot.ModeMarkdown,
-					})
-
-				case msg.Photo != nil:
-					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Photo{
-						File:    msg.Photo.File,
-						Caption: msg.Caption,
-					})
-				case msg.Video != nil:
-					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Video{
-						File:    msg.Video.File,
-						Caption: msg.Caption,
-					})
-				case msg.Document != nil:
-					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Document{
-						File:     msg.Document.File,
-						Caption:  msg.Caption,
-						FileName: msg.Document.FileName,
-					})
-				case msg.Sticker != nil:
-					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Sticker{
-						File: msg.Sticker.File,
-					})
-				case msg.Audio != nil:
-					_, err = tb.Send(telebot.ChatID(userChatID), &telebot.Audio{
-						File:    msg.Audio.File,
-						Caption: msg.Caption,
-					})
-				default:
-					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "📎 [Неподдерживаемый тип сообщения]")
-					if sendErr != nil {
-						lg.Error("can't send error message to group", zap.Error(sendErr))
-					}
-					return nil
-				}
-
-				if err != nil {
-					lg.Error("can't send response to user", zap.Int64("userChatID", userChatID), zap.Error(err))
-					_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
-					if sendErr != nil {
-						lg.Error("can't send error message to group", zap.Error(sendErr))
-					}
-					return nil
-				}
-
-				_, sendErr := tb.Send(telebot.ChatID(cfg.Bot.GroupID), "✅ Ответ отправлен пользователю.")
-				if sendErr != nil {
-					lg.Error("can't send confirmation to group", zap.Error(sendErr))
-				}
-				return nil
-			}
-
-			if msg.Text == "/start" {
-				return c.Send("Отправьте ваш вопрос одним сообщением")
-			}
-
-			// Message to group
-			if msg.Chat.ID != cfg.Bot.GroupID {
-				// Send user summary card before the forwarded message.
-				summary, err := reqRepo.GetUserSummary(msg.Chat.ID)
-				var textMsg string
-				if err != nil {
-					lg.Error("can't get user summary", zap.Int64("tg_id", msg.Chat.ID), zap.Error(err))
-
-					// Fall back to plain header so the message still gets forwarded.
-					textMsg = fmt.Sprintf("💬 Новое сообщение от `%d`", msg.Chat.ID)
-				} else {
-					textMsg = "💬 *Новое обращение*\n\n" + summary.Format()
-				}
-				tb.Send(telebot.ChatID(cfg.Bot.GroupID), textMsg, &telebot.SendOptions{ParseMode: telebot.ModeMarkdown})
-
-				forwardedMsg, err := tb.Forward(telebot.ChatID(cfg.Bot.GroupID), msg)
-				if err != nil {
-					lg.Error("can't forward message", zap.Error(err))
-					return c.Send("Не удалось отослать сообщение. Попробуйте ещё раз.")
-				}
-
-				err = reqRepo.SaveRequest(forwardedMsg.ID, msg.Chat.ID)
-				if err != nil {
-					lg.Error("can't save message", zap.String("msg", msg.Text), zap.Error(err))
-				}
-
-				return c.Send("✅ Сообщение поддержке отправлено")
-			}
-
-			return nil
-		}
-
-		tb.Handle(telebot.OnText, handleMessage)
-		tb.Handle(telebot.OnPhoto, handleMessage)
-		tb.Handle(telebot.OnVideo, handleMessage)
-		tb.Handle(telebot.OnDocument, handleMessage)
-		tb.Handle(telebot.OnSticker, handleMessage)
-		tb.Handle(telebot.OnAudio, handleMessage)
-		tb.Handle(telebot.OnVoice, handleMessage)
-		tb.Handle(telebot.OnAnimation, handleMessage)
-
-		go tb.Start()
-
-		lg.Info("Bot started")
-
-		c := make(chan os.Signal, 2)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		<-c
-
-		tb.Stop()
-		lg.Info("Bot finished")
-	},
+	b.Stop()
+	lg.Info("Bot stopped")
+	return nil
 }
 
 func init() {
