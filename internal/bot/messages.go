@@ -29,6 +29,13 @@ const (
 	msgReplyUserBlocked = `❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.`
 
 	msgReplyHeader = `👨‍💻 Ответ из поддержки:`
+
+	clients = `
+• *Windows* — Happ / Hiddify
+• *Android* — Happ / V2rayNG
+• *iOS* — Streisand / FoXray
+• *macOS* — Streisand / V2rayU / FoXray
+• *Linux* — Happ / Nekoray / Qv2ray`
 )
 
 // faqItem describes one FAQ entry shown as an inline button.
@@ -46,12 +53,7 @@ var faqItems = []faqItem{
 		Answer: `*Как подключиться?*
 
 1. Скачай клиент под своё устройство:
-
-• *Windows* — Happ / Hiddify
-• *Android* — V2rayNG / Happ
-• *iOS* — Streisand / FoXray
-• *macOS* — Streisand / V2rayU / FoXray
-• *Linux* — Happ / Nekoray / Qv2ray
+` + clients + `
 
 2. Импортируй полученную ссылку на подписку в клиент.
 3. Нажми «Подключиться».
@@ -86,12 +88,7 @@ var faqItems = []faqItem{
 	{
 		Label: "📱 Какой клиент выбрать?",
 		Answer: `*Рекомендуемые клиенты:*
-
-• *Windows* — Happ / Hiddify
-• *Android* — V2rayNG / Happ
-• *iOS* — Streisand / FoXray
-• *macOS* — Streisand / V2rayU / FoXray
-• *Linux* — Happ / Nekoray / Qv2ray
+` + clients + `
 
 Все клиенты бесплатны, ищи в официальных магазинах или на GitHub.`,
 	},
