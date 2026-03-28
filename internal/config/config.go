@@ -12,11 +12,10 @@ type Config struct {
 }
 
 type Bot struct {
-	Token        string   `mapstructure:"token"`
-	GroupID      int64    `mapstructure:"group_id"`
-	NoticeChanID int64    `mapstructure:"notice_channel"`
-	SubHost      string   `mapstructure:"sub_host"`
-	Webhook      *Webhook `mapstructure:"webhook"`
+	Token   string   `mapstructure:"token"`
+	GroupID int64    `mapstructure:"group_id"`
+	SubHost string   `mapstructure:"sub_host"`
+	Webhook *Webhook `mapstructure:"webhook"`
 }
 
 type Webhook struct {
