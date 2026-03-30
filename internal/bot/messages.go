@@ -9,7 +9,7 @@ const (
 
 const (
 	// msgWelcome uses HTML parse mode — safe for any username with underscores.
-	msgWelcome = `Привет! Я бот поддержки <a href="https://t.me/VPNinjas_bot">VPNinjas</a>.
+	msgWelcome = `Привет! Я бот поддержки <a href="%s">%s</a>.
 
 Если у тебя вопрос — нажми на FAQ или опиши проблему текстом.
 Чем подробнее — тем быстрее поможем.`

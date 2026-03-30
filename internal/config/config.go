@@ -7,8 +7,14 @@ import (
 )
 
 type Config struct {
-	Bot Bot `mapstructure:"bot"`
-	DB  DB  `mapstructure:"db"`
+	Bot    Bot    `mapstructure:"bot"`
+	VpnBot VpnBot `mapstructure:"vpnbot"`
+	DB     DB     `mapstructure:"db"`
+}
+
+type VpnBot struct {
+	URL  string `mapstructure:"url"`
+	Name string `mapstructure:"name"`
 }
 
 type Bot struct {

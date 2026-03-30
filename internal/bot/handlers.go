@@ -73,7 +73,8 @@ func (b *Bot) registerHandlers() {
 // Uses ModeHTML because the welcome text contains links with underscores in usernames
 // which would break Markdown parsing.
 func (b *Bot) handleStart(c telebot.Context) error {
-	return c.Send(msgWelcome, &telebot.SendOptions{
+	msg := fmt.Sprintf(msgWelcome, b.cfg.VpnBot.URL, b.cfg.VpnBot.Name)
+	return c.Send(msg, &telebot.SendOptions{
 		ParseMode:   telebot.ModeHTML,
 		ReplyMarkup: mainKeyboard(),
 	})

@@ -12,7 +12,6 @@ build:
 
 upload:
 	make build && rsync -av support vpn@vpngate:~/support/ && \
-	ssh vpn@vpngate sudo supervisorctl restart support && \
 	rsync -av support vpn@vpngate:~/support-old/ && \
-	ssh vpn@vpngate sudo supervisorctl restart support-old && \
+	ssh vpn@vpngate sudo supervisorctl restart {support,support-old} && \
 	rm support
