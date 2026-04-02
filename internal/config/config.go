@@ -7,9 +7,16 @@ import (
 )
 
 type Config struct {
-	Bot    Bot    `mapstructure:"bot"`
-	VpnBot VpnBot `mapstructure:"vpnbot"`
-	DB     DB     `mapstructure:"db"`
+	Bot      Bot      `mapstructure:"bot"`
+	VpnBot   VpnBot   `mapstructure:"vpnbot"`
+	DB       DB       `mapstructure:"db"`
+	Chatwoot Chatwoot `mapstructure:"chatwoot"`
+}
+
+type Chatwoot struct {
+	URL    string `mapstructure:"url"`
+	Token  string `mapstructure:"token"`
+	Listen string `mapstructure:"listen"`
 }
 
 type VpnBot struct {
@@ -19,7 +26,6 @@ type VpnBot struct {
 
 type Bot struct {
 	Token   string   `mapstructure:"token"`
-	GroupID int64    `mapstructure:"group_id"`
 	SubHost string   `mapstructure:"sub_host"`
 	Webhook *Webhook `mapstructure:"webhook"`
 }

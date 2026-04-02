@@ -23,39 +23,39 @@ type UserSummary struct {
 
 // Format returns a markdown-formatted card to send to the support group.
 func (s *UserSummary) Format() string {
-	username := "нет"
+	username := "no"
 	if s.Username != "" {
 		username = "@" + s.Username
 	}
 
-	usedTest := "нет"
+	usedTest := "no"
 	if s.UsedTest {
-		usedTest = "да"
+		usedTest = "yes"
 	}
 
-	expired := "нет"
+	expired := "no"
 	if s.Expired {
-		expired = "да"
+		expired = "yes"
 	}
 
-	sub := "нет"
+	sub := "no"
 	if s.SubKey != "" {
-		sub = fmt.Sprintf("до %s, `%s`\n`%s`", s.SubExpire.Format("02.01.2006"), s.SubName, s.SubKey)
+		sub = fmt.Sprintf("Till %s, `%s`\n%s", s.SubExpire.Format("02.01.2006"), s.SubName, s.SubKey)
 	}
 
 	last := ""
 	if s.LastTxID != "" {
-		last = "💶 Платеж: " + s.LastTxID + "\n"
+		last = "💶 Payment: " + s.LastTxID + "\n"
 	}
 
 	return fmt.Sprintf(
 		"👤 *%s* | `%d`\n"+
-			"📅 С нами с: %s\n"+
-			"💰 Баланс: *%d₽*\n"+
-			"💳 Оплат: *%d* на сумму *%d₽*\n"+
+			"📅 With us: %s\n"+
+			"💰 Balance: *%d₽*\n"+
+			"💳 Payments: *%d* on total *%d₽*\n"+
 			last+
-			"🎁 Пробный: %s\n"+
-			"🐷 Истекла: %s\n"+
+			"🎁 Test: %s\n"+
+			"🐷 Expired: %s\n"+
 			"🔐 %s",
 		username,
 		s.TgID,

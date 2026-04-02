@@ -7,6 +7,9 @@ import (
 	"strings"
 	"syscall"
 
+	"vyaliksupport/internal/chatwoot"
+	"vyaliksupport/internal/webhook"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
@@ -56,6 +59,16 @@ func runBot(cmd *cobra.Command, args []string) error {
 	if err = repo.Migrate(); err != nil {
 		lg.Error("can't migrate", zap.Error(err))
 		return err
+	}
+
+	// Initialize Chatwoot client and webhook server
+	var cwWebhook *webhook.ChatwootWebhook
+	if cfg.Chatwoot.URL != "" && cfg.Chatwoot.Listen != "" {
+		cw := chatwoot.NewWoot(cfg.Chatwoot.URL, cfg.Chatwoot.Token)
+		cwWebhook = webhook.NewChatwootWebhook(cw, repo, lg)
+		cwWebhook.Start(cfg.Chatwoot.Listen)
+	} else {
+		lg.Warn("Chatwoot not configured, webhook server disabled")
 	}
 
 	b := bot.New(tb, cfg, repo, lg)

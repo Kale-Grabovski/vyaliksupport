@@ -115,148 +115,21 @@ func (b *Bot) handleFAQBack(c telebot.Context) error {
 	})
 }
 
-// handleMessage is the main dispatcher for all incoming messages.
-// It routes based on context: group reply, persistent keyboard buttons,
-// commands, or plain user message to forward.
+// handleMessage handles all user messages - just FAQ and start commands.
 func (b *Bot) handleMessage(c telebot.Context) error {
 	msg := c.Message()
 
-	// Support group: operator is replying to a forwarded message.
-	if msg.Chat.ID == b.cfg.Bot.GroupID && msg.ReplyTo != nil {
-		return b.handleGroupReply(c)
-	}
-
-	if msg.Chat.ID != b.cfg.Bot.GroupID {
-		switch msg.Text {
-		case "/start", btnLabelHome:
-			return b.handleStart(c)
-		case "/faq", btnLabelFAQ:
-			return b.handleFAQ(c)
-		}
-
-		// Regular user message — forward to support group.
-		return b.handleUserMessage(c)
+	switch msg.Text {
+	case "/start", btnLabelHome:
+		return b.handleStart(c)
+	case "/faq", btnLabelFAQ:
+		return b.handleFAQ(c)
 	}
 
 	return nil
 }
 
-// handleGroupReply forwards an operator's reply back to the original user.
-func (b *Bot) handleGroupReply(c telebot.Context) error {
-	msg := c.Message()
-
-	userChatID, err := b.repo.FindUserChatID(msg.ReplyTo.ID)
-	if err != nil {
-		b.sendToGroup(msgReplyNotFound)
-		return nil
-	}
-
-	// Send the header message first so the user knows a reply is coming.
-	if _, err = b.tb.Send(telebot.ChatID(userChatID), msgReplyHeader); err != nil {
-		b.lg.Error("can't send reply header to user",
-			zap.Int64("userChatID", userChatID),
-			zap.Error(err),
-		)
-		b.sendToGroup(msgReplyUserBlocked)
-		return nil
-	}
-
-	// Forward the actual content depending on media type.
-	if err = b.forwardContentToUser(userChatID, msg); err != nil {
-		b.lg.Error("can't forward content to user",
-			zap.Int64("userChatID", userChatID),
-			zap.Error(err),
-		)
-		b.sendToGroup(msgReplyUserBlocked)
-		return nil
-	}
-
-	b.sendToGroup(msgReplySentOK)
-	return nil
-}
-
-// forwardContentToUser sends the correct media type to the user.
-func (b *Bot) forwardContentToUser(userChatID int64, msg *telebot.Message) error {
-	dst := telebot.ChatID(userChatID)
-
-	switch {
-	case msg.Text != "":
-		_, err := b.tb.Send(dst, msg.Text, &telebot.SendOptions{
-			ParseMode: telebot.ModeMarkdown,
-		})
-		return err
-
-	case msg.Photo != nil:
-		_, err := b.tb.Send(dst, &telebot.Photo{File: msg.Photo.File, Caption: msg.Caption})
-		return err
-
-	case msg.Video != nil:
-		_, err := b.tb.Send(dst, &telebot.Video{File: msg.Video.File, Caption: msg.Caption})
-		return err
-
-	case msg.Document != nil:
-		_, err := b.tb.Send(dst, &telebot.Document{
-			File:     msg.Document.File,
-			Caption:  msg.Caption,
-			FileName: msg.Document.FileName,
-		})
-		return err
-
-	case msg.Sticker != nil:
-		_, err := b.tb.Send(dst, &telebot.Sticker{File: msg.Sticker.File})
-		return err
-
-	case msg.Audio != nil:
-		_, err := b.tb.Send(dst, &telebot.Audio{File: msg.Audio.File, Caption: msg.Caption})
-		return err
-
-	case msg.Voice != nil:
-		_, err := b.tb.Send(dst, &telebot.Voice{File: msg.Voice.File})
-		return err
-
-	case msg.Animation != nil:
-		_, err := b.tb.Send(dst, &telebot.Animation{File: msg.Animation.File, Caption: msg.Caption})
-		return err
-
-	default:
-		b.sendToGroup(msgUnsupportedType)
-		return nil
-	}
-}
-
-// handleUserMessage forwards a user's message to the support group.
-func (b *Bot) handleUserMessage(c telebot.Context) error {
-	msg := c.Message()
-
-	// Build the user summary card shown above the forwarded message.
-	summaryText := b.buildSummaryText(msg.Chat.ID)
-
-	if _, err := b.tb.Send(
-		telebot.ChatID(b.cfg.Bot.GroupID),
-		summaryText,
-		&telebot.SendOptions{ParseMode: telebot.ModeMarkdown},
-	); err != nil {
-		b.lg.Error("can't send summary to group", zap.Error(err))
-	}
-
-	forwardedMsg, err := b.tb.Forward(telebot.ChatID(b.cfg.Bot.GroupID), msg)
-	if err != nil {
-		b.lg.Error("can't forward message to group", zap.Error(err))
-		return c.Send("Не удалось отослать сообщение. Попробуйте ещё раз.")
-	}
-
-	if err = b.repo.SaveRequest(forwardedMsg.ID, msg.Chat.ID); err != nil {
-		b.lg.Error("can't save support request",
-			zap.String("text", msg.Text),
-			zap.Error(err),
-		)
-	}
-
-	return c.Send(msgSentToSupport)
-}
-
-// buildSummaryText returns a formatted user card for the support group.
-// Falls back to a plain header if the summary cannot be loaded.
+// buildSummaryText returns a formatted user card for Chatwoot.
 func (b *Bot) buildSummaryText(chatID int64) string {
 	summary, err := b.repo.GetUserSummary(chatID)
 	if err != nil {
@@ -264,13 +137,6 @@ func (b *Bot) buildSummaryText(chatID int64) string {
 		return fmt.Sprintf("💬 Новое сообщение от `%d`", chatID)
 	}
 	return "💬 *Новое обращение*\n\n" + summary.Format()
-}
-
-// sendToGroup sends a plain text message to the support group, logging errors.
-func (b *Bot) sendToGroup(text string) {
-	if _, err := b.tb.Send(telebot.ChatID(b.cfg.Bot.GroupID), text); err != nil {
-		b.lg.Error("can't send message to group", zap.Error(err))
-	}
 }
 
 // faqKeyboard builds the inline keyboard for the FAQ menu.

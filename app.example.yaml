@@ -8,3 +8,7 @@ bot:
 db:
   dsn: postgresql://user:pwd@127.0.0.1:5433/postgres?sslmode=disable
   dialect: postgres
+chatwoot:
+  url: https://chat.example.com
+  token: your-chatwoot-api-token
+  listen: 0.0.0.0:1488  # HTTP server for incoming webhooks
