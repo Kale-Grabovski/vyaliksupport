@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"vyaliksupport/internal/chatwoot"
@@ -52,6 +53,8 @@ func (h *ChatwootWebhook) Start(listenAddr string) {
 	}()
 }
 
+var tt = 0
+
 // Handle processes incoming Chatwoot webhooks.
 func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -59,7 +62,10 @@ func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var event MessageCreatedEvent
+	//st, _ := io.ReadAll(r.Body)
+	//_ = st
+
+	var event AutoMessageCreatedEvent
 	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
 		h.lg.Warn("failed to decode webhook", zap.Error(err))
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -67,16 +73,19 @@ func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Only process incoming messages (from users)
-	if event.MessageType != "incoming" || event.Event != "message_created" {
+	if !strings.Contains(event.Event, "message_created") || len(event.Messages) == 0 {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
+	msg := event.Messages[0]
+
 	// Get user summary from database
-	summary, err := h.repo.GetUserSummary(event.Conversation.Attrs.TgID)
+	tgID := event.Meta.Sender.AdditionalAttributes.SocialTelegramUserId
+	summary, err := h.repo.GetUserSummary(tgID)
 	if err != nil {
 		h.lg.Error("failed to get user summary",
-			zap.Int64("tg_id", event.Conversation.Attrs.TgID),
+			zap.Int64("tg_id", tgID),
 			zap.Error(err),
 		)
 		w.WriteHeader(http.StatusOK)
@@ -87,21 +96,21 @@ func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 	metadata := "💬 *New message*\n\n" + summary.Format()
 
 	// Send metadata note to Chatwoot
-	if err := h.woot.SendMetadataNote(event.Account.ID, event.Conversation.ID, metadata); err != nil {
+	if err := h.woot.SendMetadataNote(msg.AccountId, msg.ConversationId, metadata); err != nil {
 		h.lg.Error("failed to send metadata note",
-			zap.Int("account_id", event.Account.ID),
-			zap.Int("conv_id", event.Conversation.ID),
+			zap.Int("account_id", msg.AccountId),
+			zap.Int("conv_id", msg.ConversationId),
 			zap.Error(err),
 		)
 	}
 
 	h.lg.Info("received webhook",
-		zap.Int("account_id", event.Account.ID),
-		zap.Int("conv_id", event.Conversation.ID),
-		zap.String("msg_type", event.MessageType),
+		zap.Int("account_id", msg.AccountId),
+		zap.Int("conv_id", msg.ConversationId),
+		zap.Int("msg_type", msg.MessageType),
 	)
 
-	h.notify(event.Conversation.Attrs.TgID, event.Sender.Attrs.Username, event.Content)
+	h.notify(tgID, event.Meta.Sender.AdditionalAttributes.Username, msg.Content)
 
 	w.WriteHeader(http.StatusOK)
 }
