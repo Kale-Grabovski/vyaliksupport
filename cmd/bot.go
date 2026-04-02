@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"vyaliksupport/internal/chatwoot"
+	"vyaliksupport/internal/sender"
 	"vyaliksupport/internal/webhook"
 
 	"github.com/jmoiron/sqlx"
@@ -61,11 +62,14 @@ func runBot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Initialize Ntfy sender
+	ntfySender := sender.NewNtfySender(cfg.Ntfy.Topic, cfg.Ntfy.Token)
+
 	// Initialize Chatwoot client and webhook server
 	var cwWebhook *webhook.ChatwootWebhook
 	if cfg.Chatwoot.URL != "" && cfg.Chatwoot.Listen != "" {
 		cw := chatwoot.NewWoot(cfg.Chatwoot.URL, cfg.Chatwoot.Token)
-		cwWebhook = webhook.NewChatwootWebhook(cw, repo, lg)
+		cwWebhook = webhook.NewChatwootWebhook(cw, repo, lg, ntfySender)
 		cwWebhook.Start(cfg.Chatwoot.Listen)
 	} else {
 		lg.Warn("Chatwoot not configured, webhook server disabled")

@@ -20,7 +20,12 @@ type Bot struct {
 
 // New creates a Bot and registers all handlers.
 func New(tb *telebot.Bot, cfg config.Config, repo *postgres.Req, lg *zap.Logger) *Bot {
-	b := &Bot{tb: tb, cfg: cfg, repo: repo, lg: lg}
+	b := &Bot{
+		lg:   lg,
+		tb:   tb,
+		cfg:  cfg,
+		repo: repo,
+	}
 	b.registerHandlers()
 	return b
 }
@@ -127,16 +132,6 @@ func (b *Bot) handleMessage(c telebot.Context) error {
 	}
 
 	return nil
-}
-
-// buildSummaryText returns a formatted user card for Chatwoot.
-func (b *Bot) buildSummaryText(chatID int64) string {
-	summary, err := b.repo.GetUserSummary(chatID)
-	if err != nil {
-		b.lg.Error("can't get user summary", zap.Int64("tg_id", chatID), zap.Error(err))
-		return fmt.Sprintf("💬 Новое сообщение от `%d`", chatID)
-	}
-	return "💬 *Новое обращение*\n\n" + summary.Format()
 }
 
 // faqKeyboard builds the inline keyboard for the FAQ menu.

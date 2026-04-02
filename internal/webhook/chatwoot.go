@@ -1,12 +1,16 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"unicode/utf8"
 
 	"vyaliksupport/internal/chatwoot"
+	"vyaliksupport/internal/sender"
 	"vyaliksupport/pkg/db/postgres"
 
 	"go.uber.org/zap"
@@ -14,35 +18,19 @@ import (
 
 // ChatwootWebhook handles incoming webhooks from Chatwoot.
 type ChatwootWebhook struct {
-	woot *chatwoot.Woot
-	repo *postgres.Req
-	lg   *zap.Logger
-}
-
-// MessageCreatedEvent represents the webhook payload for message_created event.
-type MessageCreatedEvent struct {
-	Event        string `json:"event"`
-	ID           int    `json:"id"`
-	Content      string `json:"content"`
-	MessageType  string `json:"message_type"`
-	Conversation struct {
-		ID      int `json:"id"`
-		InboxID int `json:"inbox_id"`
-		Attrs   struct {
-			TgID int64 `json:"chat_id"`
-		} `json:"additional_attributes"`
-	} `json:"conversation"`
-	Account struct {
-		ID int `json:"id"`
-	} `json:"account"`
+	woot   *chatwoot.Woot
+	repo   *postgres.Req
+	sender *sender.NtfySender
+	lg     *zap.Logger
 }
 
 // NewChatwootWebhook creates a new Chatwoot webhook handler.
-func NewChatwootWebhook(woot *chatwoot.Woot, repo *postgres.Req, lg *zap.Logger) *ChatwootWebhook {
+func NewChatwootWebhook(woot *chatwoot.Woot, repo *postgres.Req, lg *zap.Logger, sender *sender.NtfySender) *ChatwootWebhook {
 	return &ChatwootWebhook{
-		woot: woot,
-		repo: repo,
-		lg:   lg,
+		woot:   woot,
+		repo:   repo,
+		sender: sender,
+		lg:     lg,
 	}
 }
 
@@ -113,5 +101,22 @@ func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 		zap.String("msg_type", event.MessageType),
 	)
 
+	h.notify(event.Conversation.Attrs.TgID, event.Sender.Attrs.Username, event.Content)
+
 	w.WriteHeader(http.StatusOK)
+}
+
+func (h *ChatwootWebhook) notify(tgID int64, username, text string) {
+	if utf8.RuneCountInString(text) > 70 {
+		runes := []rune(text)
+		text = string(runes[:70]) + "…"
+	}
+	ntfyMsg := sender.Message{
+		Body:  text,
+		Title: fmt.Sprintf("Message from %d %s", tgID, username),
+		Tags:  []string{"incoming"},
+	}
+	if err := h.sender.Send(context.Background(), ntfyMsg); err != nil {
+		h.lg.Warn("failed to send sender notification", zap.Error(err))
+	}
 }
