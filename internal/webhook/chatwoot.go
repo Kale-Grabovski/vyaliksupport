@@ -46,6 +46,24 @@ func NewChatwootWebhook(woot *chatwoot.Woot, repo *postgres.Req, lg *zap.Logger)
 	}
 }
 
+// Start begins listening for webhooks on the specified address.
+func (h *ChatwootWebhook) Start(listenAddr string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", h.Handle)
+
+	server := &http.Server{
+		Addr:    listenAddr,
+		Handler: mux,
+	}
+
+	go func() {
+		h.lg.Info("starting chatwoot webhook server", zap.String("addr", listenAddr))
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("webhook server failed: %v", err)
+		}
+	}()
+}
+
 // Handle processes incoming Chatwoot webhooks.
 func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -96,22 +114,4 @@ func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 	)
 
 	w.WriteHeader(http.StatusOK)
-}
-
-// Start begins listening for webhooks on the specified address.
-func (h *ChatwootWebhook) Start(listenAddr string) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", h.Handle)
-
-	server := &http.Server{
-		Addr:    listenAddr,
-		Handler: mux,
-	}
-
-	go func() {
-		h.lg.Info("starting chatwoot webhook server", zap.String("addr", listenAddr))
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("webhook server failed: %v", err)
-		}
-	}()
 }

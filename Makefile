@@ -10,6 +10,11 @@ build:
 	make deps
 	GOOS=linux GOARCH=amd64 garble -tiny -literals build -o support .
 
+upload-old:
+	make build && rsync -av support vpn@vpngate:~/support-old/ && \
+	ssh vpn@vpngate sudo supervisorctl restart support-old && \
+	rm support
+
 upload:
 	make build && rsync -av support vpn@vpngate:~/support/ && \
 	rsync -av support vpn@vpngate:~/support-old/ && \
