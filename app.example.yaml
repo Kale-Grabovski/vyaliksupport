@@ -12,3 +12,6 @@ chatwoot:
   url: https://chat.example.com
   token: your-chatwoot-api-token
   listen: 0.0.0.0:1488  # HTTP server for incoming webhooks
+ntfy:
+  topic: long_topic_name
+  token: tk_ofjoewjfoeo

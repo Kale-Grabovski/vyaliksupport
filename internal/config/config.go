@@ -11,6 +11,12 @@ type Config struct {
 	VpnBot   VpnBot   `mapstructure:"vpnbot"`
 	DB       DB       `mapstructure:"db"`
 	Chatwoot Chatwoot `mapstructure:"chatwoot"`
+	Ntfy     Ntfy     `mapstructure:"ntfy"`
+}
+
+type Ntfy struct {
+	Topic string `mapstructure:"topic"`
+	Token string `mapstructure:"token"`
 }
 
 type Chatwoot struct {
