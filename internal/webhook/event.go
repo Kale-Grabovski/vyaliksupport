@@ -2,12 +2,25 @@ package webhook
 
 import "time"
 
+// Attachment represents a file attachment in Chatwoot messages.
+type Attachment struct {
+	ID          int    `json:"id"`
+	FileType    string `json:"file_type"`
+	ContentType string `json:"content_type"`
+	FileName    string `json:"file_name"`
+	FileSize    int    `json:"file_size"`
+	URL         string `json:"url"`
+	ThumbURL    string `json:"thumb_url,omitempty"`
+}
+
 // MessageCreatedEvent represents the webhook payload for message_created event.
 type MessageCreatedEvent struct {
-	Event        string `json:"event"`
-	ID           int    `json:"id"`
-	Content      string `json:"content"`
-	MessageType  string `json:"message_type"`
+	Event        string       `json:"event"`
+	ID           int          `json:"id"`
+	Content      string       `json:"content"`
+	MessageType  string       `json:"message_type"`
+	ContentType  string       `json:"content_type"`
+	Attachments  []Attachment `json:"attachments"`
 	Conversation struct {
 		ID      int `json:"id"`
 		InboxID int `json:"inbox_id"`
@@ -69,6 +82,7 @@ type AutoMessageCreatedEvent struct {
 		ProcessedMessageContent string `json:"processed_message_content"`
 		Sentiment               struct {
 		} `json:"sentiment"`
+		Attachments  []Attachment `json:"attachments"`
 		Conversation struct {
 			AssigneeId     int `json:"assignee_id"`
 			UnreadCount    int `json:"unread_count"`
@@ -118,8 +132,7 @@ type AutoMessageCreatedEvent struct {
 		} `json:"sender"`
 		Assignee struct {
 			Id                 int         `json:"id"`
-			Name               string      `json:"name"`
-			AvailableName      string      `json:"available_name"`
+			Name               string      `json:"available_name"`
 			AvatarUrl          string      `json:"avatar_url"`
 			Type               string      `json:"type"`
 			AvailabilityStatus interface{} `json:"availability_status"`

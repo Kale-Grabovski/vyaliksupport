@@ -54,9 +54,6 @@ func (b *Bot) registerHandlers() {
 	b.tb.Handle("/faq", b.handleFAQ)
 
 	// FAQ inline button callbacks.
-	// telebot v4 resolves a callback by Btn.CallbackUnique() == "\f" + Unique.
-	// We pass a *Btn with only Unique set — Handle() only needs CallbackUnique(),
-	// the ReplyMarkup instance is irrelevant for registration.
 	for i := range faqItems {
 		idx := i
 		btn := &telebot.Btn{Unique: fmt.Sprintf("faq_%d", idx)}
@@ -68,23 +65,17 @@ func (b *Bot) registerHandlers() {
 	b.tb.Handle(backBtn, b.handleFAQBack)
 
 	// All media types route through the same dispatcher.
-	for _, endpoint := range []interface{}{
-		telebot.OnText,
-		telebot.OnPhoto,
-		telebot.OnVideo,
-		telebot.OnDocument,
-		telebot.OnSticker,
-		telebot.OnAudio,
-		telebot.OnVoice,
-		telebot.OnAnimation,
-	} {
-		b.tb.Handle(endpoint, b.handleMessage)
-	}
+	b.tb.Handle(telebot.OnText, b.handleMessage)
+	b.tb.Handle(telebot.OnPhoto, b.handleMessage)
+	b.tb.Handle(telebot.OnVideo, b.handleMessage)
+	b.tb.Handle(telebot.OnDocument, b.handleMessage)
+	b.tb.Handle(telebot.OnSticker, b.handleMessage)
+	b.tb.Handle(telebot.OnAudio, b.handleMessage)
+	b.tb.Handle(telebot.OnVoice, b.handleMessage)
+	b.tb.Handle(telebot.OnAnimation, b.handleMessage)
 }
 
 // handleStart sends the welcome message with the persistent reply keyboard.
-// Uses ModeHTML because the welcome text contains links with underscores in usernames
-// which would break Markdown parsing.
 func (b *Bot) handleStart(c telebot.Context) error {
 	msg := fmt.Sprintf(msgWelcome, b.cfg.VpnBot.URL, b.cfg.VpnBot.Name)
 	return c.Send(msg, &telebot.SendOptions{
@@ -101,11 +92,9 @@ func (b *Bot) handleFAQ(c telebot.Context) error {
 	})
 }
 
-// handleFAQAnswer returns a callback handler that answers a specific FAQ item
-// and appends a "back" inline button to return to the FAQ list.
+// handleFAQAnswer returns a callback handler that answers a specific FAQ item.
 func (b *Bot) handleFAQAnswer(idx int) telebot.HandlerFunc {
 	return func(c telebot.Context) error {
-		// Acknowledge the button tap — removes the loading spinner.
 		if err := c.Respond(); err != nil {
 			b.lg.Warn("can't respond to callback", zap.Error(err))
 		}
@@ -116,12 +105,11 @@ func (b *Bot) handleFAQAnswer(idx int) telebot.HandlerFunc {
 	}
 }
 
-// handleFAQBack handles the inline "back" button — re-sends the FAQ menu.
+// handleFAQBack handles the inline "back" button.
 func (b *Bot) handleFAQBack(c telebot.Context) error {
 	if err := c.Respond(); err != nil {
 		b.lg.Warn("can't respond to callback", zap.Error(err))
 	}
-	// Edit the current message to become the FAQ menu — no new message noise.
 	return c.Edit(msgFAQ, &telebot.SendOptions{
 		ParseMode:   telebot.ModeMarkdown,
 		ReplyMarkup: b.faqKeyboard(),
@@ -146,8 +134,7 @@ func (b *Bot) handleMessage(c telebot.Context) error {
 	return b.forwardToChatwoot(c)
 }
 
-// forwardToChatwoot finds or creates a Chatwoot conversation for this Telegram user
-// and sends the message content to it.
+// forwardToChatwoot finds or creates a Chatwoot conversation and sends all content.
 func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	if b.woot == nil {
 		return nil
@@ -156,14 +143,10 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	user := c.Sender()
 	msg := c.Message()
 
-	// Build the user identifier — Chatwoot uses this to find/create the conversation.
 	identifier := fmt.Sprintf("tg:%d", user.ID)
-
-	// Get the Chatwoot inbox for this integration.
 	inboxID := b.cfg.Chatwoot.InboxID
 	accountID := b.cfg.Chatwoot.AccountID
 
-	// Find or create the conversation.
 	convID, err := b.woot.FindOrCreateConversation(accountID, inboxID, identifier)
 	if err != nil {
 		b.lg.Error("failed to find or create Chatwoot conversation",
@@ -176,23 +159,96 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 		})
 	}
 
-	// Build the message content. Include the user's display name for context.
-	var content string
+	// Build prefix with user info
+	var prefix string
 	if user.Username != "" {
-		content = fmt.Sprintf("@%s (%s):\n%s", user.Username, user.FirstName, msg.Text)
+		prefix = fmt.Sprintf("@%s (%s):", user.Username, user.FirstName)
 	} else {
-		content = fmt.Sprintf("%s (ID: %d):\n%s", user.FirstName, user.ID, msg.Text)
-	}
-	if content == "" {
-		content = "[empty message]"
+		prefix = fmt.Sprintf("%s (ID: %d):", user.FirstName, user.ID)
 	}
 
-	// Send the message to Chatwoot.
-	if err := b.woot.SendMessage(accountID, convID, content); err != nil {
+	// Collect attachments from media
+	var attachments []chatwoot.AttachmentInfo
+	var text string
+
+	switch {
+	case msg.Photo != nil:
+		text = msg.Caption
+		att := b.getAttachmentFromFile(msg.Photo.FileID, msg.Photo.FileFileName)
+		if att.URL != "" {
+			attachments = append(attachments, att)
+		}
+
+	case msg.Video != nil:
+		text = msg.Caption
+		att := b.getAttachmentFromFile(msg.Video.FileID, msg.Video.FileFileName)
+		if att.URL != "" {
+			attachments = append(attachments, att)
+		}
+
+	case msg.Document != nil:
+		text = msg.Caption
+		att := b.getAttachmentFromFile(msg.Document.FileID, msg.Document.FileName)
+		if att.URL != "" {
+			attachments = append(attachments, att)
+		}
+
+	case msg.Sticker != nil:
+		text = "[sticker]"
+		att := b.getAttachmentFromFile(msg.Sticker.FileID, msg.Sticker.UniqueID+".webp")
+		if att.URL != "" {
+			att.MimeType = "image/webp"
+			attachments = append(attachments, att)
+		}
+
+	case msg.Audio != nil:
+		text = msg.Caption
+		att := b.getAttachmentFromFile(msg.Audio.FileID, msg.Audio.FileFileName)
+		if att.URL != "" {
+			attachments = append(attachments, att)
+		}
+
+	case msg.Voice != nil:
+		text = "[voice message]"
+		att := b.getAttachmentFromFile(msg.Voice.FileID, msg.Voice.FileID+".ogg")
+		if att.URL != "" {
+			att.MimeType = "audio/ogg"
+			attachments = append(attachments, att)
+		}
+
+	case msg.Animation != nil:
+		text = msg.Caption
+		att := b.getAttachmentFromFile(msg.Animation.FileID, msg.Animation.FileFileName)
+		if att.URL != "" {
+			attachments = append(attachments, att)
+		}
+
+	default:
+		text = msg.Text
+	}
+
+	// Build content
+	content := prefix
+	if text != "" {
+		content += "\n" + text
+	}
+
+	// Send with or without attachments
+	var sendErr error
+	if len(attachments) > 0 {
+		sendErr = b.woot.SendMessageWithAttachments(accountID, convID, content, attachments)
+	} else {
+		if content == prefix {
+			content = prefix + "\n[empty message]"
+		}
+		sendErr = b.woot.SendMessage(accountID, convID, content)
+	}
+
+	if sendErr != nil {
 		b.lg.Error("failed to send message to Chatwoot",
 			zap.Int64("user_id", user.ID),
 			zap.Int("conv_id", convID),
-			zap.Error(err),
+			zap.Error(sendErr),
 		)
 		return c.Send(msgSentToSupport, &telebot.SendOptions{
 			ReplyMarkup: mainKeyboard(),
@@ -202,6 +258,7 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	b.lg.Info("forwarded message to Chatwoot",
 		zap.Int64("user_id", user.ID),
 		zap.Int("conv_id", convID),
+		zap.String("type", getMsgType(msg)),
 	)
 
 	return c.Send(msgSentToSupport, &telebot.SendOptions{
@@ -209,10 +266,42 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	})
 }
 
+// getMsgType returns message type string.
+func getMsgType(msg *telebot.Message) string {
+	switch {
+	case msg.Photo != nil:
+		return "photo"
+	case msg.Video != nil:
+		return "video"
+	case msg.Document != nil:
+		return "document"
+	case msg.Sticker != nil:
+		return "sticker"
+	case msg.Audio != nil:
+		return "audio"
+	case msg.Voice != nil:
+		return "voice"
+	case msg.Animation != nil:
+		return "animation"
+	default:
+		return "text"
+	}
+}
+
+// getAttachmentFromFile gets file URL from bot and creates attachment.
+func (b *Bot) getAttachmentFromFile(fileID, filename string) chatwoot.AttachmentInfo {
+	file, err := b.tb.FileByID(fileID)
+	if err != nil {
+		b.lg.Warn("failed to get file URL", zap.String("file_id", fileID), zap.Error(err))
+		return chatwoot.AttachmentInfo{}
+	}
+	return chatwoot.AttachmentInfo{
+		URL:      file.FileURL,
+		FileName: filename,
+	}
+}
+
 // faqKeyboard builds the inline keyboard for the FAQ menu.
-// All buttons MUST be created from the same markup instance —
-// telebot serialises InlineKeyboardMarkup from this object,
-// and Unique in each Btn must match what was registered in Handle().
 func (b *Bot) faqKeyboard() *telebot.ReplyMarkup {
 	markup := &telebot.ReplyMarkup{}
 	rows := make([]telebot.Row, 0, len(faqItems))
@@ -233,7 +322,6 @@ func backKeyboard() *telebot.ReplyMarkup {
 }
 
 // mainKeyboard returns the persistent reply keyboard shown at the bottom of the chat.
-// It never disappears until explicitly removed — always-on navigation for the user.
 func mainKeyboard() *telebot.ReplyMarkup {
 	markup := &telebot.ReplyMarkup{ResizeKeyboard: true}
 	home := markup.Text(btnLabelHome)
