@@ -7,104 +7,86 @@ import (
 	"strings"
 	"syscall"
 
+	"vyaliksupport/internal/chatwoot"
+	"vyaliksupport/internal/sender"
+	"vyaliksupport/internal/webhook"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"gopkg.in/telebot.v3"
+	"gopkg.in/telebot.v4"
 
+	"vyaliksupport/internal/bot"
 	"vyaliksupport/internal/config"
 	"vyaliksupport/pkg/db/postgres"
 )
 
 var botCmd = &cobra.Command{
-	Use: "support",
-	Run: func(cmd *cobra.Command, args []string) {
-		cfg, err := loadConfig(cfgFile)
-		if err != nil {
-			panic(err)
-		}
+	Use:  "support",
+	RunE: runBot,
+}
 
-		lgCfg := zap.NewProductionConfig()
-		lgCfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05")
-		lg, _ := lgCfg.Build()
-		defer lg.Sync()
+func runBot(cmd *cobra.Command, args []string) error {
+	cfg, err := loadConfig(cfgFile)
+	if err != nil {
+		return err
+	}
 
-		db, err := connectDB(cfg.DB.DSN, cfg.DB.Dialect)
-		if err != nil {
-			lg.Error("can't connect to DB: "+cfg.DB.DSN, zap.Error(err))
-			return
-		}
-		defer db.Close()
+	lgCfg := zap.NewProductionConfig()
+	lgCfg.EncoderConfig.EncodeTime = zapcore.TimeEncoderOfLayout("2006-01-02 15:04:05")
+	lg, err := lgCfg.Build()
+	if err != nil {
+		return fmt.Errorf("failed to build logger: %w", err)
+	}
+	defer lg.Sync() //nolint:errcheck
 
-		tb, err := telebot.NewBot(cfg.BotSettings())
-		if err != nil {
-			lg.Error("can't init TG bot", zap.Error(err))
-			return
-		}
+	db, err := connectDB(cfg.DB.DSN, cfg.DB.Dialect)
+	if err != nil {
+		lg.Error("can't connect to DB", zap.String("dsn", cfg.DB.DSN), zap.Error(err))
+		return err
+	}
+	defer db.Close()
 
-		reqRepo := postgres.NewReq(db)
-		err = reqRepo.Migrate()
-		if err != nil {
-			lg.Error("can't migrate", zap.Error(err))
-			return
-		}
+	tb, err := telebot.NewBot(cfg.BotSettings())
+	if err != nil {
+		lg.Error("can't init TG bot", zap.Error(err))
+		return err
+	}
 
-		tb.Handle(telebot.OnText, func(c telebot.Context) error {
-			msg := c.Message()
-			if msg.Chat.ID == cfg.Bot.GroupID && msg.ReplyTo != nil {
-				repliedMsgID := msg.ReplyTo.ID
+	repo := postgres.NewReq(db, cfg.Bot.SubHost)
+	if err = repo.Migrate(); err != nil {
+		lg.Error("can't migrate", zap.Error(err))
+		return err
+	}
 
-				userChatID, err := reqRepo.FindUserChatID(repliedMsgID)
-				if err != nil {
-					return c.Send("❌ Не могу найти ваш запрос")
-				}
+	// Initialize Ntfy sender
+	ntfySender := sender.NewNtfySender(cfg.Ntfy.Topic, cfg.Ntfy.Token)
 
-				_, err = tb.Send(telebot.ChatID(userChatID), "👨‍💻 *Ответ из поддержки:*\n"+msg.Text, &telebot.SendOptions{
-					ParseMode: telebot.ModeMarkdown,
-				})
-				if err != nil {
-					lg.Error("can't send response to user", zap.Int64("userChatID", userChatID), zap.Error(err))
-					return c.Send("❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.")
-				}
-				return c.Send("✅ Ответ отправлен пользователю.")
-			}
+	// Initialize Chatwoot client and webhook server
+	var cwWebhook *webhook.ChatwootWebhook
+	if cfg.Chatwoot.URL != "" && cfg.Chatwoot.Listen != "" {
+		cw := chatwoot.NewWoot(cfg.Chatwoot.URL, cfg.Chatwoot.Token)
+		cwWebhook = webhook.NewChatwootWebhook(cw, repo, lg, ntfySender)
+		cwWebhook.Start(cfg.Chatwoot.Listen)
+	} else {
+		lg.Warn("Chatwoot not configured, webhook server disabled")
+	}
 
-			if msg.Text == "/start" {
-				return c.Send("Отправьте ваш вопрос одним сообщением")
-			}
+	b := bot.New(tb, cfg, repo, lg)
 
-			if msg.Chat.ID != cfg.Bot.GroupID {
-				forwardedMsg, err := tb.Forward(telebot.ChatID(cfg.Bot.GroupID), msg)
-				if err != nil {
-					lg.Error("can't forward message", zap.Error(err))
-					return c.Send("Не удалось отослать сообщение. Попробуйте ещё раз.")
-				}
+	go b.Start()
+	lg.Info("Bot started")
 
-				err = reqRepo.SaveRequest(forwardedMsg.ID, msg.Chat.ID)
-				if err != nil {
-					lg.Error("can't save message", zap.String("msg", msg.Text), zap.Error(err))
-				}
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
 
-				return c.Send("✅ Сообщение поддержке отправлено")
-			}
-
-			return nil
-		})
-
-		go tb.Start()
-
-		lg.Info("Bot started")
-
-		c := make(chan os.Signal, 2)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		<-c
-
-		tb.Stop()
-		lg.Info("Bot finished")
-	},
+	b.Stop()
+	lg.Info("Bot stopped")
+	return nil
 }
 
 func init() {

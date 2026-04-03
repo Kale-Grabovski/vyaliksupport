@@ -1,15 +1,21 @@
 package postgres
 
 import (
+	"database/sql"
+	"fmt"
+
+	"vyaliksupport/internal/domain"
+
 	"github.com/jmoiron/sqlx"
 )
 
 type Req struct {
-	db *sqlx.DB
+	db      *sqlx.DB
+	subHost string // e.g. "https://sub.example.com"
 }
 
-func NewReq(db *sqlx.DB) *Req {
-	return &Req{db: db}
+func NewReq(db *sqlx.DB, subHost string) *Req {
+	return &Req{db: db, subHost: subHost}
 }
 
 func (d *Req) SaveRequest(supportMessageID int, userChatID int64) error {
@@ -24,6 +30,60 @@ func (d *Req) FindUserChatID(supportMessageID int) (userChatID int64, err error)
 	return
 }
 
+// GetUserSummary collects all info about the user from the main DB.
+func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
+	s := &domain.UserSummary{TgID: tgID}
+
+	// Base user info + payment stats in one query.
+	row := d.db.QueryRow(`
+		SELECT
+			coalesce(u.username, ''),
+			u.created_at,
+			u.balance,
+			u.used_test,
+			count(p.id) AS pay_count,
+			coalesce(sum(p.paid_amount), 0) AS pay_sum,
+			coalesce((
+				SELECT tx_id
+				FROM tg_payments
+				WHERE tg_id = $1 AND status = 'ok' AND payment_system = 'platega'
+				ORDER BY created_at DESC
+				LIMIT 1
+			), '') AS last_tx_id
+		FROM tg_users AS u
+		LEFT JOIN tg_payments AS p
+			ON p.tg_id = u.tg_id AND p.status = 'ok' AND p.paid_amount > 0
+		WHERE u.tg_id = $1
+		GROUP BY u.username, u.created_at, u.balance, u.used_test
+	`, tgID)
+
+	err := row.Scan(&s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest, &s.PayCount, &s.PaySum, &s.LastTxID)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %w", err)
+	}
+
+	// Active subscription (most recent non-expired, unlimited traffic only).
+	var shortUUID sql.NullString
+	var subName sql.NullString
+	var expireAt sql.NullTime
+
+	err = d.db.QueryRow(`
+		SELECT short_uuid, username, expire_at, expire_at < now()
+		FROM users
+		WHERE telegram_id = $1
+		ORDER BY expire_at DESC
+		LIMIT 1
+	`, tgID).Scan(&shortUUID, &subName, &expireAt, &s.Expired)
+
+	if err == nil && shortUUID.Valid {
+		s.SubName = subName.String
+		s.SubExpire = expireAt.Time
+		s.SubKey = fmt.Sprintf("%s/%s", d.subHost, shortUUID.String)
+	}
+
+	return s, nil
+}
+
 func (d *Req) Migrate() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS tg_support_requests (
@@ -36,8 +96,7 @@ func (d *Req) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_user_chat_id ON tg_support_requests(user_chat_id)`,
 	}
 	for _, q := range queries {
-		_, err := d.db.Exec(q)
-		if err != nil {
+		if _, err := d.db.Exec(q); err != nil {
 			return err
 		}
 	}

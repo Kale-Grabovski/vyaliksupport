@@ -1,9 +1,17 @@
 bot:
   token: 3242342434:34234324324
   group_id: -10033333333
+  sub_host: https://sub.example.com  # base URL for subscription links
     #webhook:
     #url: https://domain.com/tg/wh
   #listen: 6688
 db:
   dsn: postgresql://user:pwd@127.0.0.1:5433/postgres?sslmode=disable
   dialect: postgres
+chatwoot:
+  url: https://chat.example.com
+  token: your-chatwoot-api-token
+  listen: 0.0.0.0:1488  # HTTP server for incoming webhooks
+ntfy:
+  topic: long_topic_name
+  token: tk_ofjoewjfoeo

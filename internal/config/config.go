@@ -3,17 +3,36 @@ package config
 import (
 	"time"
 
-	"gopkg.in/telebot.v3"
+	"gopkg.in/telebot.v4"
 )
 
 type Config struct {
-	Bot Bot `mapstructure:"bot"`
-	DB  DB  `mapstructure:"db"`
+	Bot      Bot      `mapstructure:"bot"`
+	VpnBot   VpnBot   `mapstructure:"vpnbot"`
+	DB       DB       `mapstructure:"db"`
+	Chatwoot Chatwoot `mapstructure:"chatwoot"`
+	Ntfy     Ntfy     `mapstructure:"ntfy"`
+}
+
+type Ntfy struct {
+	Topic string `mapstructure:"topic"`
+	Token string `mapstructure:"token"`
+}
+
+type Chatwoot struct {
+	URL    string `mapstructure:"url"`
+	Token  string `mapstructure:"token"`
+	Listen string `mapstructure:"listen"`
+}
+
+type VpnBot struct {
+	URL  string `mapstructure:"url"`
+	Name string `mapstructure:"name"`
 }
 
 type Bot struct {
 	Token   string   `mapstructure:"token"`
-	GroupID int64    `mapstructure:"group_id"`
+	SubHost string   `mapstructure:"sub_host"`
 	Webhook *Webhook `mapstructure:"webhook"`
 }
 
