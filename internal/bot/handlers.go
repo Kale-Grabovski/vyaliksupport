@@ -170,17 +170,21 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	// Collect attachments from media
 	var attachments []chatwoot.AttachmentInfo
 	var text string
+	var msgType string
 
 	switch {
 	case msg.Photo != nil:
 		text = msg.Caption
+		msgType = "photo"
 		att := b.getAttachmentFromFile(msg.Photo.File.FileID, msg.Photo.File.FileID+".jpg")
 		if att.URL != "" {
+			att.MimeType = "image/jpeg"
 			attachments = append(attachments, att)
 		}
 
 	case msg.Video != nil:
 		text = msg.Caption
+		msgType = "video"
 		att := b.getAttachmentFromFile(msg.Video.File.FileID, msg.Video.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
@@ -188,13 +192,16 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 
 	case msg.Document != nil:
 		text = msg.Caption
+		msgType = "document"
 		att := b.getAttachmentFromFile(msg.Document.FileID, msg.Document.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
 
 	case msg.Sticker != nil:
-		text = "[sticker]"
+		text = ""
+		msgType = "sticker"
+		// Get the actual sticker file (will be .webp or .tgs)
 		att := b.getAttachmentFromFile(msg.Sticker.FileID, msg.Sticker.UniqueID+".webp")
 		if att.URL != "" {
 			att.MimeType = "image/webp"
@@ -203,13 +210,15 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 
 	case msg.Audio != nil:
 		text = msg.Caption
+		msgType = "audio"
 		att := b.getAttachmentFromFile(msg.Audio.File.FileID, msg.Audio.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
 
 	case msg.Voice != nil:
-		text = "[voice message]"
+		text = ""
+		msgType = "voice"
 		att := b.getAttachmentFromFile(msg.Voice.FileID, msg.Voice.FileID+".ogg")
 		if att.URL != "" {
 			att.MimeType = "audio/ogg"
@@ -218,6 +227,7 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 
 	case msg.Animation != nil:
 		text = msg.Caption
+		msgType = "animation"
 		att := b.getAttachmentFromFile(msg.Animation.File.FileID, msg.Animation.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
@@ -225,6 +235,7 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 
 	default:
 		text = msg.Text
+		msgType = "text"
 	}
 
 	// Build content
@@ -233,9 +244,10 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 		content += "\n" + text
 	}
 
-	// Send with or without attachments
+	// Send with or without attachments - use single multipart request
 	var sendErr error
 	if len(attachments) > 0 {
+		// Send everything in ONE request: text + all attachments together
 		sendErr = b.woot.SendMessageWithAttachments(accountID, convID, content, attachments)
 	} else {
 		if content == prefix {
@@ -258,7 +270,8 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	b.lg.Info("forwarded message to Chatwoot",
 		zap.Int64("user_id", user.ID),
 		zap.Int("conv_id", convID),
-		zap.String("type", getMsgType(msg)),
+		zap.String("type", msgType),
+		zap.Int("attachments", len(attachments)),
 	)
 
 	return c.Send(msgSentToSupport, &telebot.SendOptions{

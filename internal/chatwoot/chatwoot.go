@@ -363,46 +363,96 @@ type AttachmentInfo struct {
 
 // SendMessageWithAttachments sends a message with file attachments to Chatwoot.
 func (w *Woot) SendMessageWithAttachments(accountID, convID int, content string, attachments []AttachmentInfo) error {
+	url := fmt.Sprintf("%s/api/v1/accounts/%d/conversations/%d/messages", w.URL, accountID, convID)
+
+	// If no attachments, use simple JSON request
 	if len(attachments) == 0 {
 		return w.SendMessage(accountID, convID, content)
 	}
 
-	url := fmt.Sprintf("%s/api/v1/accounts/%d/conversations/%d/messages", w.URL, accountID, convID)
+	// Download all files first
+	files := make([][]byte, 0, len(attachments))
+	for _, att := range attachments {
+		resp, err := http.Get(att.URL)
+		if err != nil {
+			w.lg.Warn("failed to download file", zap.String("url", att.URL), zap.Error(err))
+			files = append(files, nil)
+			continue
+		}
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			w.lg.Warn("failed to read file data", zap.String("url", att.URL), zap.Error(err))
+			files = append(files, nil)
+			continue
+		}
+		files = append(files, data)
+	}
 
-	payload := map[string]interface{}{
-		"content":      content,
-		"message_type": "incoming",
-	}
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+	// Create multipart form request with BOTH content and attachments in ONE request
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add content field (the message text)
+	if err := writer.WriteField("content", content); err != nil {
+		return fmt.Errorf("failed to write content field: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return err
+	// Add message_type field
+	if err := writer.WriteField("message_type", "incoming"); err != nil {
+		return fmt.Errorf("failed to write message_type field: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+
+	// Add all files as attachments in the SAME request
+	for i, att := range attachments {
+		if files[i] == nil {
+			continue
+		}
+		mimeType := att.MimeType
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		part, err := writer.CreateFormFile("attachments[]", att.FileName)
+		if err != nil {
+			w.lg.Warn("failed to create form file", zap.String("filename", att.FileName), zap.Error(err))
+			continue
+		}
+		if _, err := part.Write(files[i]); err != nil {
+			w.lg.Warn("failed to write file data", zap.String("filename", att.FileName), zap.Error(err))
+			continue
+		}
+		_ = mimeType // used for content-type detection by CreateFormFile
+	}
+
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("failed to close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, body)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("api_access_token", w.APIToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("API returned status %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	// Now send attachments one by one
-	for _, att := range attachments {
-		if err := w.sendAttachment(accountID, convID, att); err != nil {
-			w.lg.Error("failed to send attachment", zap.String("url", att.URL), zap.Error(err))
-			// Continue with other attachments
-		}
-	}
+	w.lg.Info("sent message with attachments to Chatwoot",
+		zap.Int("account_id", accountID),
+		zap.Int("conv_id", convID),
+		zap.String("content", content),
+		zap.Int("attachment_count", len(attachments)),
+	)
 
 	return nil
 }
