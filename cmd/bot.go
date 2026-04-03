@@ -66,16 +66,22 @@ func runBot(cmd *cobra.Command, args []string) error {
 	ntfySender := sender.NewNtfySender(cfg.Ntfy.Topic, cfg.Ntfy.Token)
 
 	// Initialize Chatwoot client and webhook server
+	var cw *chatwoot.Woot
 	var cwWebhook *webhook.ChatwootWebhook
 	if cfg.Chatwoot.URL != "" && cfg.Chatwoot.Listen != "" {
-		cw := chatwoot.NewWoot(cfg.Chatwoot.URL, cfg.Chatwoot.Token)
+		cw = chatwoot.NewWoot(cfg.Chatwoot.URL, cfg.Chatwoot.Token)
 		cwWebhook = webhook.NewChatwootWebhook(cw, repo, lg, ntfySender)
 		cwWebhook.Start(cfg.Chatwoot.Listen)
 	} else {
 		lg.Warn("Chatwoot not configured, webhook server disabled")
 	}
 
-	b := bot.New(tb, cfg, repo, lg)
+	b := bot.New(tb, cfg, repo, lg, cw)
+
+	// Inject the bot into the webhook handler so it can send replies to users.
+	if cwWebhook != nil {
+		cwWebhook.SetBot(b.TelegramBot())
+	}
 
 	go b.Start()
 	lg.Info("Bot started")

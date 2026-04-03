@@ -20,9 +20,11 @@ type Ntfy struct {
 }
 
 type Chatwoot struct {
-	URL    string `mapstructure:"url"`
-	Token  string `mapstructure:"token"`
-	Listen string `mapstructure:"listen"`
+	URL       string `mapstructure:"url"`
+	Token     string `mapstructure:"token"`
+	Listen    string `mapstructure:"listen"`
+	AccountID int    `mapstructure:"account_id"`
+	InboxID   int    `mapstructure:"inbox_id"`
 }
 
 type VpnBot struct {

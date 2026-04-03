@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v4"
 
+	"vyaliksupport/internal/chatwoot"
 	"vyaliksupport/internal/config"
 	"vyaliksupport/pkg/db/postgres"
 )
@@ -16,18 +17,25 @@ type Bot struct {
 	cfg  config.Config
 	repo *postgres.Req
 	lg   *zap.Logger
+	woot *chatwoot.Woot
 }
 
 // New creates a Bot and registers all handlers.
-func New(tb *telebot.Bot, cfg config.Config, repo *postgres.Req, lg *zap.Logger) *Bot {
+func New(tb *telebot.Bot, cfg config.Config, repo *postgres.Req, lg *zap.Logger, woot *chatwoot.Woot) *Bot {
 	b := &Bot{
-		lg:   lg,
 		tb:   tb,
 		cfg:  cfg,
 		repo: repo,
+		lg:   lg,
+		woot: woot,
 	}
 	b.registerHandlers()
 	return b
+}
+
+// TelegramBot returns the underlying *telebot.Bot for use by the Chatwoot webhook handler.
+func (b *Bot) TelegramBot() *telebot.Bot {
+	return b.tb
 }
 
 // Start runs the bot (blocking via go tb.Start with graceful stop on sigChan).
@@ -120,18 +128,85 @@ func (b *Bot) handleFAQBack(c telebot.Context) error {
 	})
 }
 
-// handleMessage handles all user messages - just FAQ and start commands.
+// handleMessage handles all user messages — FAQ/start commands and Chatwoot forwarding.
 func (b *Bot) handleMessage(c telebot.Context) error {
 	msg := c.Message()
 
-	switch msg.Text {
-	case "/start", btnLabelHome:
-		return b.handleStart(c)
-	case "/faq", btnLabelFAQ:
-		return b.handleFAQ(c)
+	// Handle bot commands and keyboard buttons locally.
+	if msg.Text != "" {
+		switch msg.Text {
+		case "/start", btnLabelHome:
+			return b.handleStart(c)
+		case "/faq", btnLabelFAQ:
+			return b.handleFAQ(c)
+		}
 	}
 
-	return nil
+	// Forward the user's message to Chatwoot.
+	return b.forwardToChatwoot(c)
+}
+
+// forwardToChatwoot finds or creates a Chatwoot conversation for this Telegram user
+// and sends the message content to it.
+func (b *Bot) forwardToChatwoot(c telebot.Context) error {
+	if b.woot == nil {
+		return nil
+	}
+
+	user := c.Sender()
+	msg := c.Message()
+
+	// Build the user identifier — Chatwoot uses this to find/create the conversation.
+	identifier := fmt.Sprintf("tg:%d", user.ID)
+
+	// Get the Chatwoot inbox for this integration.
+	inboxID := b.cfg.Chatwoot.InboxID
+	accountID := b.cfg.Chatwoot.AccountID
+
+	// Find or create the conversation.
+	convID, err := b.woot.FindOrCreateConversation(accountID, inboxID, identifier)
+	if err != nil {
+		b.lg.Error("failed to find or create Chatwoot conversation",
+			zap.Int64("user_id", user.ID),
+			zap.String("identifier", identifier),
+			zap.Error(err),
+		)
+		return c.Send(msgSentToSupport, &telebot.SendOptions{
+			ReplyMarkup: mainKeyboard(),
+		})
+	}
+
+	// Build the message content. Include the user's display name for context.
+	var content string
+	if user.Username != "" {
+		content = fmt.Sprintf("@%s (%s):\n%s", user.Username, user.FirstName, msg.Text)
+	} else {
+		content = fmt.Sprintf("%s (ID: %d):\n%s", user.FirstName, user.ID, msg.Text)
+	}
+	if content == "" {
+		content = "[empty message]"
+	}
+
+	// Send the message to Chatwoot.
+	if err := b.woot.SendMessage(accountID, convID, content); err != nil {
+		b.lg.Error("failed to send message to Chatwoot",
+			zap.Int64("user_id", user.ID),
+			zap.Int("conv_id", convID),
+			zap.Error(err),
+		)
+		return c.Send(msgSentToSupport, &telebot.SendOptions{
+			ReplyMarkup: mainKeyboard(),
+		})
+	}
+
+	b.lg.Info("forwarded message to Chatwoot",
+		zap.Int64("user_id", user.ID),
+		zap.Int("conv_id", convID),
+	)
+
+	return c.Send(msgSentToSupport, &telebot.SendOptions{
+		ReplyMarkup: mainKeyboard(),
+	})
 }
 
 // faqKeyboard builds the inline keyboard for the FAQ menu.
