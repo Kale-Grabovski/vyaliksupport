@@ -159,12 +159,6 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 		})
 	}
 
-	b.lg.Info("forwarding to chatwoot",
-		zap.Int64("user_id", user.ID),
-		zap.Int("conv_id", convID),
-		zap.String("text", msg.Text),
-	)
-
 	// Build prefix with user info
 	var prefix string
 	if user.Username != "" {
@@ -180,63 +174,89 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	switch {
 	case msg.Photo != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Photo.File.FileID, msg.Photo.File.FileID+".jpg")
-		if att.URL != "" {
-			att.MimeType = "image/jpeg"
+		att, err := b.getAttachmentFromFile(msg.Photo.File, msg.Photo.File.FileID+".jpg", "image/jpeg")
+		if err != nil {
+			b.lg.Warn("failed to get photo file", zap.Error(err))
+		} else {
 			attachments = append(attachments, att)
+			b.lg.Info("photo attachment", zap.String("url", att.URL), zap.Any("file_id", msg.Photo.File.FileID))
 		}
-		b.lg.Info("photo attachment", zap.String("url", att.URL))
 
 	case msg.Video != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Video.File.FileID, msg.Video.FileName)
-		if att.URL != "" {
-			attachments = append(attachments, att)
+		filename := msg.Video.FileName
+		if filename == "" {
+			filename = msg.Video.File.FileID + ".mp4"
 		}
-		b.lg.Info("video attachment", zap.String("url", att.URL))
+		att, err := b.getAttachmentFromFile(msg.Video.File, filename, "video/mp4")
+		if err != nil {
+			b.lg.Warn("failed to get video file", zap.Error(err))
+		} else {
+			attachments = append(attachments, att)
+			b.lg.Info("video attachment", zap.String("url", att.URL))
+		}
 
 	case msg.Document != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Document.FileID, msg.Document.FileName)
-		if att.URL != "" {
+		att, err := b.getAttachmentFromFile(msg.Document.File, msg.Document.FileName, msg.Document.MIME)
+		if err != nil {
+			b.lg.Warn("failed to get document file", zap.Error(err))
+		} else {
 			attachments = append(attachments, att)
+			b.lg.Info("document attachment", zap.String("url", att.URL), zap.String("filename", msg.Document.FileName))
 		}
-		b.lg.Info("document attachment", zap.String("url", att.URL))
 
 	case msg.Sticker != nil:
-		// Sticker - send only as file, no text prefix
-		text = ""
-		att := b.getAttachmentFromFile(msg.Sticker.FileID, msg.Sticker.UniqueID+".webp")
-		if att.URL != "" {
-			att.MimeType = "image/webp"
+		text = msg.Caption
+		att, err := b.getAttachmentFromFile(msg.Sticker.File, msg.Sticker.UniqueID+".webp", "image/webp")
+		if err != nil {
+			b.lg.Warn("failed to get sticker file", zap.Error(err))
+		} else {
 			attachments = append(attachments, att)
+			b.lg.Info("sticker attachment", zap.String("url", att.URL), zap.String("unique_id", msg.Sticker.UniqueID))
 		}
-		b.lg.Info("sticker attachment", zap.String("url", att.URL), zap.String("unique_id", msg.Sticker.UniqueID))
 
 	case msg.Audio != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Audio.File.FileID, msg.Audio.FileName)
-		if att.URL != "" {
-			attachments = append(attachments, att)
+		filename := msg.Audio.FileName
+		if filename == "" {
+			filename = msg.Audio.File.FileID + ".mp3"
 		}
-		b.lg.Info("audio attachment", zap.String("url", att.URL))
+		mimeType := msg.Audio.MIME
+		if mimeType == "" {
+			mimeType = "audio/mpeg"
+		}
+		att, err := b.getAttachmentFromFile(msg.Audio.File, filename, mimeType)
+		if err != nil {
+			b.lg.Warn("failed to get audio file", zap.Error(err))
+		} else {
+			attachments = append(attachments, att)
+			b.lg.Info("audio attachment", zap.String("url", att.URL))
+		}
 
 	case msg.Voice != nil:
-		text = ""
-		att := b.getAttachmentFromFile(msg.Voice.FileID, msg.Voice.FileID+".ogg")
-		if att.URL != "" {
-			att.MimeType = "audio/ogg"
+		text = msg.Caption
+		att, err := b.getAttachmentFromFile(msg.Voice.File, msg.Voice.File.FileID+".ogg", "audio/ogg")
+		if err != nil {
+			b.lg.Warn("failed to get voice file", zap.Error(err))
+		} else {
 			attachments = append(attachments, att)
+			b.lg.Info("voice attachment", zap.String("url", att.URL))
 		}
-		b.lg.Info("voice attachment", zap.String("url", att.URL))
 
 	case msg.Animation != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Animation.File.FileID, msg.Animation.FileName)
-		if att.URL != "" {
-			attachments = append(attachments, att)
+		filename := msg.Animation.FileName
+		if filename == "" {
+			filename = msg.Animation.File.FileID + ".gif"
 		}
-		b.lg.Info("animation attachment", zap.String("url", att.URL))
+		att, err := b.getAttachmentFromFile(msg.Animation.File, filename, "video/mp4")
+		if err != nil {
+			b.lg.Warn("failed to get animation file", zap.Error(err))
+		} else {
+			attachments = append(attachments, att)
+			b.lg.Info("animation attachment", zap.String("url", att.URL))
+		}
 
 	default:
 		text = msg.Text
@@ -248,16 +268,35 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 		content += "\n" + text
 	}
 
-	// Send with or without attachments - use single multipart request
+	b.lg.Info("forwarding to chatwoot",
+		zap.Int64("user_id", user.ID),
+		zap.Int("conv_id", convID),
+		zap.String("text", text),
+		zap.Int("attachment_count", len(attachments)),
+	)
+
+	// Send with or without attachments
 	var sendErr error
 	if len(attachments) > 0 {
-		// Send everything in ONE request: text + all attachments together
-		b.lg.Info("sending message with attachments",
-			zap.Int("conv_id", convID),
-			zap.String("content", content),
-			zap.Int("attach_count", len(attachments)),
-		)
-		sendErr = b.woot.SendMessageWithAttachments(accountID, convID, content, attachments)
+		// Check if we have valid attachments with URLs
+		validAttachments := make([]chatwoot.AttachmentInfo, 0)
+		for _, att := range attachments {
+			if att.URL != "" {
+				validAttachments = append(validAttachments, att)
+			}
+		}
+
+		if len(validAttachments) > 0 {
+			b.lg.Info("sending message with attachments",
+				zap.Int("conv_id", convID),
+				zap.String("content", content),
+				zap.Int("attach_count", len(validAttachments)),
+			)
+			sendErr = b.woot.SendMessageWithAttachments(accountID, convID, content, validAttachments)
+		} else {
+			// No valid attachment URLs, send text only
+			sendErr = b.woot.SendMessage(accountID, convID, content)
+		}
 	} else {
 		if content == prefix {
 			content = prefix + "\n[empty message]"
@@ -287,17 +326,19 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	})
 }
 
-// getAttachmentFromFile gets file URL from bot and creates attachment.
-func (b *Bot) getAttachmentFromFile(fileID, filename string) chatwoot.AttachmentInfo {
-	file, err := b.tb.FileByID(fileID)
-	if err != nil {
-		b.lg.Warn("failed to get file URL", zap.String("file_id", fileID), zap.Error(err))
-		return chatwoot.AttachmentInfo{}
-	}
+// getAttachmentFromFile downloads a file from Telegram using the bot API and returns
+// a publicly accessible URL for Chatwoot to download.
+// The returned URL is in the format: https://api.telegram.org/file/bot{token}/{file_path}
+func (b *Bot) getAttachmentFromFile(file telebot.File, filename, mimeType string) (chatwoot.AttachmentInfo, error) {
+	// Construct the public URL: Telegram's getFile returns a relative path
+	// Full URL format: https://api.telegram.org/file/bot<token>/<file_path>
+	publicURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.cfg.Bot.Token, file.FilePath)
+
 	return chatwoot.AttachmentInfo{
-		URL:      file.FileURL,
+		URL:      publicURL,
 		FileName: filename,
-	}
+		MimeType: mimeType,
+	}, nil
 }
 
 // faqKeyboard builds the inline keyboard for the FAQ menu.

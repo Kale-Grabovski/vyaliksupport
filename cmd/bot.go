@@ -79,8 +79,11 @@ func runBot(cmd *cobra.Command, args []string) error {
 	b := bot.New(tb, cfg, repo, lg, cw)
 
 	// Inject the bot into the webhook handler so it can send replies to users.
+	// Also set the bot's own user ID to prevent feedback loops.
 	if cwWebhook != nil {
 		cwWebhook.SetBot(b.TelegramBot())
+		// Set bot's own user ID to filter out self-messages
+		cwWebhook.SetBotUserID(tb.Me.ID)
 	}
 
 	go b.Start()
