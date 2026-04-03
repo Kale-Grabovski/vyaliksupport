@@ -136,17 +136,35 @@ func (h *ChatwootWebhook) Handle(w http.ResponseWriter, r *http.Request) {
 func (h *ChatwootWebhook) handleMessageEvent(event *MessageCreatedEvent) {
 	// Only process incoming messages (from users)
 	if !strings.Contains(event.Event, "message_created") {
+		h.lg.Debug("ignoring event", zap.String("event", event.Event))
 		return
 	}
 
+	// IMPORTANT: Only process INCOMING messages (from users to agent)
+	// Do NOT process outgoing messages (from agent to user) - that would create a loop!
 	if event.MessageType != "incoming" {
+		h.lg.Debug("ignoring non-incoming message",
+			zap.String("message_type", event.MessageType),
+			zap.String("content", event.Content),
+		)
 		return
 	}
+
+	h.lg.Info("received incoming message from Chatwoot",
+		zap.String("event", event.Event),
+		zap.String("message_type", event.MessageType),
+		zap.String("content", event.Content),
+		zap.Int("attachments", len(event.Attachments)),
+	)
 
 	// Get Telegram user ID from conversation
 	tgID := h.extractTelegramID(event)
 	if tgID == 0 {
-		h.lg.Warn("could not extract Telegram ID from event", zap.Any("event", event))
+		h.lg.Warn("could not extract Telegram ID from event",
+			zap.Int("conv_id", event.Conversation.ID),
+			zap.Int64("chat_id", event.Conversation.Attrs.TgID),
+			zap.String("identifier", event.Conversation.Attrs.Identifier),
+		)
 		return
 	}
 
@@ -164,10 +182,24 @@ func (h *ChatwootWebhook) handleAutoMessageEvent(event *AutoMessageCreatedEvent)
 	// Get the message
 	msg := event.Messages[0]
 
-	// Skip private notes
+	// Skip private notes and outgoing messages
 	if msg.Private {
+		h.lg.Debug("skipping private note")
 		return
 	}
+
+	// Only process incoming messages
+	if msg.MessageType != 1 { // 1 = incoming in Chatwoot
+		h.lg.Debug("skipping non-incoming message in auto event",
+			zap.Int("message_type", msg.MessageType),
+		)
+		return
+	}
+
+	h.lg.Info("received auto message event",
+		zap.String("content", msg.Content),
+		zap.Int("attachments", len(msg.Attachments)),
+	)
 
 	// Get Telegram ID from various sources
 	var tgID int64
@@ -180,7 +212,7 @@ func (h *ChatwootWebhook) handleAutoMessageEvent(event *AutoMessageCreatedEvent)
 	}
 	if tgID == 0 {
 		// Try from conversation identifier via API
-		tgIDFromConv, err := h.getTelegramIDFromChatwoot(event.Messages[0].Conversation.AssigneeId, event.Messages[0].ConversationId)
+		tgIDFromConv, err := h.getTelegramIDFromChatwoot(msg.Conversation.AssigneeId, msg.ConversationId)
 		if err == nil {
 			tgID = tgIDFromConv
 		}
@@ -212,17 +244,36 @@ func (h *ChatwootWebhook) extractTelegramID(event *MessageCreatedEvent) int64 {
 		return event.Conversation.Attrs.TgID
 	}
 
+	// Try from identifier
+	if event.Conversation.Attrs.Identifier != "" {
+		idStr := event.Conversation.Attrs.Identifier
+		if strings.HasPrefix(idStr, "tg:") {
+			idStr = strings.TrimPrefix(idStr, "tg:")
+		}
+		if tgID, err := strconv.ParseInt(idStr, 10, 64); err == nil && tgID > 0 {
+			return tgID
+		}
+	}
+
+	// Try from sender identifier
+	if event.Sender.Identifier != "" {
+		idStr := event.Sender.Identifier
+		if strings.HasPrefix(idStr, "tg:") {
+			idStr = strings.TrimPrefix(idStr, "tg:")
+		}
+		if tgID, err := strconv.ParseInt(idStr, 10, 64); err == nil && tgID > 0 {
+			return tgID
+		}
+	}
+
 	// Try to get from Chatwoot API using conversation ID
 	tgID, err := h.getTelegramIDFromChatwoot(event.Account.ID, event.Conversation.ID)
 	if err != nil {
 		h.lg.Warn("failed to get Telegram ID from Chatwoot API", zap.Error(err))
-	}
-	if tgID != 0 {
-		return tgID
+		return 0
 	}
 
-	// Try from sender identifier (contact identifier like "tg:123456")
-	return 0
+	return tgID
 }
 
 // getTelegramIDFromChatwoot fetches the conversation from Chatwoot and extracts Telegram ID.
@@ -232,11 +283,19 @@ func (h *ChatwootWebhook) getTelegramIDFromChatwoot(accountID, convID int) (int6
 		return 0, err
 	}
 
+	h.lg.Info("got conversation info",
+		zap.String("identifier", info.Identifier),
+		zap.String("phone", info.Phone),
+	)
+
 	// Extract from identifier (format: "tg:123456789")
-	if strings.HasPrefix(info.Identifier, "tg:") {
-		idStr := strings.TrimPrefix(info.Identifier, "tg:")
+	if info.Identifier != "" {
+		idStr := info.Identifier
+		if strings.HasPrefix(idStr, "tg:") {
+			idStr = strings.TrimPrefix(idStr, "tg:")
+		}
 		tgID, err := strconv.ParseInt(idStr, 10, 64)
-		if err == nil {
+		if err == nil && tgID > 0 {
 			return tgID, nil
 		}
 	}
@@ -260,6 +319,13 @@ func (h *ChatwootWebhook) forwardToTelegram(tgID int64, username, text string, a
 	}
 
 	tgUser := &telebot.User{ID: tgID}
+
+	h.lg.Info("forwarding to Telegram",
+		zap.Int64("tg_id", tgID),
+		zap.String("username", username),
+		zap.String("text", text),
+		zap.Int("attachments", len(attachments)),
+	)
 
 	// Build message content
 	content := text
@@ -309,6 +375,11 @@ func (h *ChatwootWebhook) sendMediaToTelegram(tgUser *telebot.User, text string,
 		captionText = msgReplyHeader + "\n\n" + text
 	}
 
+	h.lg.Info("sending media to Telegram",
+		zap.Int("attachment_count", len(attachments)),
+		zap.String("first_url", attachments[0].URL),
+	)
+
 	// Send first attachment with caption
 	att := attachments[0]
 	if att.URL != "" {
@@ -320,7 +391,8 @@ func (h *ChatwootWebhook) sendMediaToTelegram(tgUser *telebot.User, text string,
 			)
 			// Fallback to text
 			h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text, &telebot.SendOptions{
-				ParseMode: telebot.ModeHTML,
+				ParseMode:   telebot.ModeHTML,
+				ReplyMarkup: mainKeyboard(),
 			})
 		} else {
 			ext := extFromContentType(contentType, att.FileName)
@@ -328,18 +400,34 @@ func (h *ChatwootWebhook) sendMediaToTelegram(tgUser *telebot.User, text string,
 			if filename == "" {
 				filename = "file" + ext
 			}
+			h.lg.Info("sending first attachment",
+				zap.String("filename", filename),
+				zap.String("content_type", contentType),
+				zap.Int("data_size", len(fileData)),
+			)
 			h.sendFileToTelegram(tgUser, captionText, fileData, filename, contentType, true)
 		}
 	} else {
-		h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text, &telebot.SendOptions{
-			ParseMode: telebot.ModeHTML,
-		})
+		// No URL - check if it's a sticker (they might not have URL in Chatwoot)
+		if strings.Contains(strings.ToLower(att.FileType), "sticker") || strings.Contains(strings.ToLower(att.FileName), "webp") {
+			h.lg.Warn("sticker has no URL, sending placeholder")
+			h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text+"\n\n[sticker]", &telebot.SendOptions{
+				ParseMode:   telebot.ModeHTML,
+				ReplyMarkup: mainKeyboard(),
+			})
+		} else {
+			h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text, &telebot.SendOptions{
+				ParseMode:   telebot.ModeHTML,
+				ReplyMarkup: mainKeyboard(),
+			})
+		}
 	}
 
 	// Send remaining attachments without caption (or with minimal text)
 	for i := 1; i < len(attachments); i++ {
 		att := attachments[i]
 		if att.URL == "" {
+			h.lg.Warn("skipping attachment with no URL", zap.Int("index", i))
 			continue
 		}
 
@@ -358,6 +446,11 @@ func (h *ChatwootWebhook) sendMediaToTelegram(tgUser *telebot.User, text string,
 			filename = "file" + ext
 		}
 
+		h.lg.Info("sending additional attachment",
+			zap.Int("index", i),
+			zap.String("filename", filename),
+			zap.String("content_type", contentType),
+		)
 		h.sendFileToTelegram(tgUser, "", fileData, filename, contentType, false)
 	}
 }

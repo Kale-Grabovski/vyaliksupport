@@ -159,6 +159,12 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 		})
 	}
 
+	b.lg.Info("forwarding to chatwoot",
+		zap.Int64("user_id", user.ID),
+		zap.Int("conv_id", convID),
+		zap.String("text", msg.Text),
+	)
+
 	// Build prefix with user info
 	var prefix string
 	if user.Username != "" {
@@ -170,75 +176,73 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	// Collect attachments from media
 	var attachments []chatwoot.AttachmentInfo
 	var text string
-	var msgType string
 
 	switch {
 	case msg.Photo != nil:
 		text = msg.Caption
-		msgType = "photo"
 		att := b.getAttachmentFromFile(msg.Photo.File.FileID, msg.Photo.File.FileID+".jpg")
 		if att.URL != "" {
 			att.MimeType = "image/jpeg"
 			attachments = append(attachments, att)
 		}
+		b.lg.Info("photo attachment", zap.String("url", att.URL))
 
 	case msg.Video != nil:
 		text = msg.Caption
-		msgType = "video"
 		att := b.getAttachmentFromFile(msg.Video.File.FileID, msg.Video.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
+		b.lg.Info("video attachment", zap.String("url", att.URL))
 
 	case msg.Document != nil:
 		text = msg.Caption
-		msgType = "document"
 		att := b.getAttachmentFromFile(msg.Document.FileID, msg.Document.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
+		b.lg.Info("document attachment", zap.String("url", att.URL))
 
 	case msg.Sticker != nil:
+		// Sticker - send only as file, no text prefix
 		text = ""
-		msgType = "sticker"
-		// Get the actual sticker file (will be .webp or .tgs)
 		att := b.getAttachmentFromFile(msg.Sticker.FileID, msg.Sticker.UniqueID+".webp")
 		if att.URL != "" {
 			att.MimeType = "image/webp"
 			attachments = append(attachments, att)
 		}
+		b.lg.Info("sticker attachment", zap.String("url", att.URL), zap.String("unique_id", msg.Sticker.UniqueID))
 
 	case msg.Audio != nil:
 		text = msg.Caption
-		msgType = "audio"
 		att := b.getAttachmentFromFile(msg.Audio.File.FileID, msg.Audio.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
+		b.lg.Info("audio attachment", zap.String("url", att.URL))
 
 	case msg.Voice != nil:
 		text = ""
-		msgType = "voice"
 		att := b.getAttachmentFromFile(msg.Voice.FileID, msg.Voice.FileID+".ogg")
 		if att.URL != "" {
 			att.MimeType = "audio/ogg"
 			attachments = append(attachments, att)
 		}
+		b.lg.Info("voice attachment", zap.String("url", att.URL))
 
 	case msg.Animation != nil:
 		text = msg.Caption
-		msgType = "animation"
 		att := b.getAttachmentFromFile(msg.Animation.File.FileID, msg.Animation.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
+		b.lg.Info("animation attachment", zap.String("url", att.URL))
 
 	default:
 		text = msg.Text
-		msgType = "text"
 	}
 
-	// Build content
+	// Build content - for media without text, just send prefix
 	content := prefix
 	if text != "" {
 		content += "\n" + text
@@ -248,6 +252,11 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	var sendErr error
 	if len(attachments) > 0 {
 		// Send everything in ONE request: text + all attachments together
+		b.lg.Info("sending message with attachments",
+			zap.Int("conv_id", convID),
+			zap.String("content", content),
+			zap.Int("attach_count", len(attachments)),
+		)
 		sendErr = b.woot.SendMessageWithAttachments(accountID, convID, content, attachments)
 	} else {
 		if content == prefix {
@@ -270,35 +279,12 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	b.lg.Info("forwarded message to Chatwoot",
 		zap.Int64("user_id", user.ID),
 		zap.Int("conv_id", convID),
-		zap.String("type", msgType),
 		zap.Int("attachments", len(attachments)),
 	)
 
 	return c.Send(msgSentToSupport, &telebot.SendOptions{
 		ReplyMarkup: mainKeyboard(),
 	})
-}
-
-// getMsgType returns message type string.
-func getMsgType(msg *telebot.Message) string {
-	switch {
-	case msg.Photo != nil:
-		return "photo"
-	case msg.Video != nil:
-		return "video"
-	case msg.Document != nil:
-		return "document"
-	case msg.Sticker != nil:
-		return "sticker"
-	case msg.Audio != nil:
-		return "audio"
-	case msg.Voice != nil:
-		return "voice"
-	case msg.Animation != nil:
-		return "animation"
-	default:
-		return "text"
-	}
 }
 
 // getAttachmentFromFile gets file URL from bot and creates attachment.
