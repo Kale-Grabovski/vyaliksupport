@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -22,6 +23,21 @@ import (
 )
 
 const msgReplyHeader = `👨‍💻 <b>Ответ от поддержки:</b>`
+
+const (
+	btnLabelHome = "🏠 Главная"
+	btnLabelFAQ  = "❓ FAQ"
+)
+
+// mainKeyboard returns the persistent reply keyboard shown at the bottom of the chat.
+// This preserves the quick reply buttons for the user.
+func mainKeyboard() *telebot.ReplyMarkup {
+	markup := &telebot.ReplyMarkup{ResizeKeyboard: true}
+	home := markup.Text(btnLabelHome)
+	faq := markup.Text(btnLabelFAQ)
+	markup.Reply(markup.Row(home, faq))
+	return markup
+}
 
 // BotPusher is implemented by *telebot.Bot.
 type BotPusher interface {
@@ -153,13 +169,29 @@ func (h *ChatwootWebhook) handleAutoMessageEvent(event *AutoMessageCreatedEvent)
 		return
 	}
 
-	// Get Telegram ID from meta or additional attributes
-	tgID := event.Meta.Sender.AdditionalAttributes.SocialTelegramUserId
+	// Get Telegram ID from various sources
+	var tgID int64
+
+	// Try from meta sender additional attributes
+	tgID = event.Meta.Sender.AdditionalAttributes.SocialTelegramUserId
 	if tgID == 0 {
-		tgID = event.AdditionalAttributes.ChatId
+		// Try from additional attributes
+		tgID = int64(event.AdditionalAttributes.ChatId)
 	}
 	if tgID == 0 {
-		h.lg.Warn("could not extract Telegram ID from auto event", zap.Any("event", event))
+		// Try from conversation identifier via API
+		tgIDFromConv, err := h.getTelegramIDFromChatwoot(event.Messages[0].Conversation.AssigneeId, event.Messages[0].ConversationId)
+		if err == nil {
+			tgID = tgIDFromConv
+		}
+	}
+
+	if tgID == 0 {
+		h.lg.Warn("could not extract Telegram ID from auto event",
+			zap.Any("event_type", event.Channel),
+			zap.Int64("social_telegram_id", event.Meta.Sender.AdditionalAttributes.SocialTelegramUserId),
+			zap.Int("chat_id", event.AdditionalAttributes.ChatId),
+		)
 		return
 	}
 
@@ -175,18 +207,53 @@ func (h *ChatwootWebhook) handleAutoMessageEvent(event *AutoMessageCreatedEvent)
 
 // extractTelegramID tries to get Telegram user ID from various places.
 func (h *ChatwootWebhook) extractTelegramID(event *MessageCreatedEvent) int64 {
-	// Try from conversation additional_attributes
+	// Try from conversation additional_attributes (custom_chat_id field in Chatwoot)
 	if event.Conversation.Attrs.TgID != 0 {
 		return event.Conversation.Attrs.TgID
 	}
 
-	// Try from sender additional_attributes
-	// This requires extending the struct - for now return 0
+	// Try to get from Chatwoot API using conversation ID
+	tgID, err := h.getTelegramIDFromChatwoot(event.Account.ID, event.Conversation.ID)
+	if err != nil {
+		h.lg.Warn("failed to get Telegram ID from Chatwoot API", zap.Error(err))
+	}
+	if tgID != 0 {
+		return tgID
+	}
+
+	// Try from sender identifier (contact identifier like "tg:123456")
 	return 0
 }
 
+// getTelegramIDFromChatwoot fetches the conversation from Chatwoot and extracts Telegram ID.
+func (h *ChatwootWebhook) getTelegramIDFromChatwoot(accountID, convID int) (int64, error) {
+	info, err := h.woot.GetConversationInfo(accountID, convID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Extract from identifier (format: "tg:123456789")
+	if strings.HasPrefix(info.Identifier, "tg:") {
+		idStr := strings.TrimPrefix(info.Identifier, "tg:")
+		tgID, err := strconv.ParseInt(idStr, 10, 64)
+		if err == nil {
+			return tgID, nil
+		}
+	}
+
+	// Try parsing as plain number
+	if info.Identifier != "" {
+		tgID, err := strconv.ParseInt(info.Identifier, 10, 64)
+		if err == nil && tgID > 0 {
+			return tgID, nil
+		}
+	}
+
+	return 0, fmt.Errorf("Telegram ID not found in conversation")
+}
+
 // forwardToTelegram sends the message content to a Telegram user.
-func (h *ChatwootWebhook) forwardToTelegram(tgID int64, username, text string, attachments []chatwoot.Attachment) {
+func (h *ChatwootWebhook) forwardToTelegram(tgID int64, username, text string, attachments []Attachment) {
 	if h.bot == nil {
 		h.lg.Warn("bot not set, cannot forward message")
 		return
@@ -203,12 +270,14 @@ func (h *ChatwootWebhook) forwardToTelegram(tgID int64, username, text string, a
 	// If there are attachments, download and forward them
 	if len(attachments) > 0 {
 		h.sendMediaToTelegram(tgUser, content, attachments)
+		h.notify(tgID, username, content)
 		return
 	}
 
-	// Plain text message
+	// Plain text message with reply keyboard preserved
 	_, err := h.bot.Send(tgUser, msgReplyHeader+"\n\n"+content, &telebot.SendOptions{
-		ParseMode: telebot.ModeHTML,
+		ParseMode:   telebot.ModeHTML,
+		ReplyMarkup: mainKeyboard(),
 	})
 	if err != nil {
 		h.lg.Warn("failed to send reply to Telegram user",
@@ -224,101 +293,138 @@ func (h *ChatwootWebhook) forwardToTelegram(tgID int64, username, text string, a
 }
 
 // sendMediaToTelegram handles sending messages with attachments to Telegram.
-func (h *ChatwootWebhook) sendMediaToTelegram(tgUser *telebot.User, text string, attachments []chatwoot.Attachment) {
-	for i, att := range attachments {
+func (h *ChatwootWebhook) sendMediaToTelegram(tgUser *telebot.User, text string, attachments []Attachment) {
+	if len(attachments) == 0 {
+		if text != "" {
+			h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text, &telebot.SendOptions{
+				ParseMode: telebot.ModeHTML,
+			})
+		}
+		return
+	}
+
+	// Build the header text once
+	captionText := text
+	if captionText != "" {
+		captionText = msgReplyHeader + "\n\n" + text
+	}
+
+	// Send first attachment with caption
+	att := attachments[0]
+	if att.URL != "" {
+		fileData, contentType, err := downloadFile(att.URL)
+		if err != nil {
+			h.lg.Warn("failed to download first attachment",
+				zap.String("url", att.URL),
+				zap.Error(err),
+			)
+			// Fallback to text
+			h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text, &telebot.SendOptions{
+				ParseMode: telebot.ModeHTML,
+			})
+		} else {
+			ext := extFromContentType(contentType, att.FileName)
+			filename := att.FileName
+			if filename == "" {
+				filename = "file" + ext
+			}
+			h.sendFileToTelegram(tgUser, captionText, fileData, filename, contentType, true)
+		}
+	} else {
+		h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text, &telebot.SendOptions{
+			ParseMode: telebot.ModeHTML,
+		})
+	}
+
+	// Send remaining attachments without caption (or with minimal text)
+	for i := 1; i < len(attachments); i++ {
+		att := attachments[i]
 		if att.URL == "" {
 			continue
 		}
 
-		// Download the file
 		fileData, contentType, err := downloadFile(att.URL)
 		if err != nil {
 			h.lg.Warn("failed to download attachment",
 				zap.String("url", att.URL),
 				zap.Error(err),
 			)
-			// Send text only as fallback
-			if i == 0 && text != "" {
-				h.bot.Send(tgUser, msgReplyHeader+"\n\n"+text, &telebot.SendOptions{
-					ParseMode: telebot.ModeHTML,
-				})
-			}
 			continue
 		}
 
-		// Determine file extension
 		ext := extFromContentType(contentType, att.FileName)
 		filename := att.FileName
 		if filename == "" {
 			filename = "file" + ext
 		}
 
-		// Send based on content type
-		err = h.sendFileToTelegram(tgUser, text, fileData, filename, contentType, i == 0 && text != "")
-		if err != nil {
-			h.lg.Warn("failed to send media to Telegram",
-				zap.String("type", contentType),
-				zap.Error(err),
-			)
-		}
+		h.sendFileToTelegram(tgUser, "", fileData, filename, contentType, false)
 	}
 }
 
 // sendFileToTelegram sends a file with optional caption to a Telegram user.
 func (h *ChatwootWebhook) sendFileToTelegram(tgUser *telebot.User, caption string, data []byte, filename, contentType string, withCaption bool) error {
-	// Create a bytes.Reader from the data
 	reader := bytes.NewReader(data)
-
-	// Determine what telebot type to use
 	mediaType := detectTelegramMediaType(contentType)
 
-	var opts telebot.SendOptions
+	var opts []interface{}
 	if withCaption && caption != "" {
-		opts.Caption = msgReplyHeader + "\n\n" + caption
-		opts.ParseMode = telebot.ModeHTML
+		opts = append(opts, &telebot.SendOptions{
+			ParseMode:   telebot.ModeHTML,
+			ReplyMarkup: mainKeyboard(),
+		})
+	} else {
+		opts = append(opts, &telebot.SendOptions{
+			ReplyMarkup: mainKeyboard(),
+		})
 	}
 
 	switch mediaType {
 	case "photo":
-		_, err := h.bot.Send(tgUser, &telebot.Photo{
-			File:    telebot.File{Name: filename, Reader: reader},
-			Caption: opts.Caption,
-		}, opts)
+		photo := &telebot.Photo{
+			File:    telebot.FromReader(reader),
+			Caption: caption,
+		}
+		_, err := h.bot.Send(tgUser, photo, opts...)
 		return err
 
 	case "video":
-		_, err := h.bot.Send(tgUser, &telebot.Video{
-			File:    telebot.File{Name: filename, Reader: reader},
-			Caption: opts.Caption,
-		}, opts)
+		video := &telebot.Video{
+			File:    telebot.FromReader(reader),
+			Caption: caption,
+		}
+		_, err := h.bot.Send(tgUser, video, opts...)
 		return err
 
 	case "document":
-		_, err := h.bot.Send(tgUser, &telebot.Document{
-			File:    telebot.File{Name: filename, Reader: reader},
-			Caption: opts.Caption,
-		}, opts)
+		doc := &telebot.Document{
+			File:    telebot.FromReader(reader),
+			Caption: caption,
+		}
+		_, err := h.bot.Send(tgUser, doc, opts...)
 		return err
 
 	case "audio":
-		_, err := h.bot.Send(tgUser, &telebot.Audio{
-			File:    telebot.File{Name: filename, Reader: reader},
-			Caption: opts.Caption,
-		}, opts)
+		audio := &telebot.Audio{
+			File:    telebot.FromReader(reader),
+			Caption: caption,
+		}
+		_, err := h.bot.Send(tgUser, audio, opts...)
 		return err
 
 	case "voice":
-		_, err := h.bot.Send(tgUser, &telebot.Voice{
-			File: telebot.File{Name: filename, Reader: reader},
-		}, opts)
+		voice := &telebot.Voice{
+			File: telebot.FromReader(reader),
+		}
+		_, err := h.bot.Send(tgUser, voice, opts...)
 		return err
 
 	default:
-		// Default to document
-		_, err := h.bot.Send(tgUser, &telebot.Document{
-			File:    telebot.File{Name: filename, Reader: reader},
-			Caption: opts.Caption,
-		}, opts)
+		doc := &telebot.Document{
+			File:    telebot.FromReader(reader),
+			Caption: caption,
+		}
+		_, err := h.bot.Send(tgUser, doc, opts...)
 		return err
 	}
 }

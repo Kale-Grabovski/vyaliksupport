@@ -13,6 +13,9 @@ type Attachment struct {
 	ThumbURL    string `json:"thumb_url,omitempty"`
 }
 
+// ChatwootAttachment is an alias for compatibility
+type ChatwootAttachment = Attachment
+
 // MessageCreatedEvent represents the webhook payload for message_created event.
 type MessageCreatedEvent struct {
 	Event        string       `json:"event"`
@@ -25,11 +28,15 @@ type MessageCreatedEvent struct {
 		ID      int `json:"id"`
 		InboxID int `json:"inbox_id"`
 		Attrs   struct {
-			TgID int64 `json:"chat_id"`
+			TgID       int64  `json:"chat_id"`
+			Identifier string `json:"identifier"`
 		} `json:"additional_attributes"`
 	} `json:"conversation"`
 	Sender struct {
-		Attrs struct {
+		ID         int    `json:"id"`
+		Name       string `json:"name"`
+		Identifier string `json:"identifier"`
+		Attrs      struct {
 			Username string `json:"username"`
 		} `json:"additional_attributes"`
 	} `json:"sender"`

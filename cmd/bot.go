@@ -69,7 +69,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 	var cw *chatwoot.Woot
 	var cwWebhook *webhook.ChatwootWebhook
 	if cfg.Chatwoot.URL != "" && cfg.Chatwoot.Listen != "" {
-		cw = chatwoot.NewWoot(cfg.Chatwoot.URL, cfg.Chatwoot.Token)
+		cw = chatwoot.NewWoot(cfg.Chatwoot.URL, cfg.Chatwoot.Token, lg)
 		cwWebhook = webhook.NewChatwootWebhook(cw, repo, lg, ntfySender)
 		cwWebhook.Start(cfg.Chatwoot.Listen)
 	} else {

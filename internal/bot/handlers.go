@@ -174,14 +174,14 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 	switch {
 	case msg.Photo != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Photo.FileID, msg.Photo.FileFileName)
+		att := b.getAttachmentFromFile(msg.Photo.File.FileID, msg.Photo.File.FileID+".jpg")
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
 
 	case msg.Video != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Video.FileID, msg.Video.FileFileName)
+		att := b.getAttachmentFromFile(msg.Video.File.FileID, msg.Video.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
@@ -203,7 +203,7 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 
 	case msg.Audio != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Audio.FileID, msg.Audio.FileFileName)
+		att := b.getAttachmentFromFile(msg.Audio.File.FileID, msg.Audio.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}
@@ -218,7 +218,7 @@ func (b *Bot) forwardToChatwoot(c telebot.Context) error {
 
 	case msg.Animation != nil:
 		text = msg.Caption
-		att := b.getAttachmentFromFile(msg.Animation.FileID, msg.Animation.FileFileName)
+		att := b.getAttachmentFromFile(msg.Animation.File.FileID, msg.Animation.FileName)
 		if att.URL != "" {
 			attachments = append(attachments, att)
 		}

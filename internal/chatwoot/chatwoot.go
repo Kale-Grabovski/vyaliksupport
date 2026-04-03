@@ -4,20 +4,26 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"strconv"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 type Woot struct {
 	URL      string // API URL (e.g. https://chat.example.com)
 	APIToken string
+	lg       *zap.Logger
 }
 
-func NewWoot(apiURL, apiToken string) *Woot {
+func NewWoot(apiURL, apiToken string, lg *zap.Logger) *Woot {
 	return &Woot{
 		URL:      apiURL,
 		APIToken: apiToken,
+		lg:       lg,
 	}
 }
 
@@ -343,6 +349,117 @@ func (w *Woot) SendMessage(accountID, convID int, content string) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// AttachmentInfo contains info for sending attachments to Chatwoot.
+type AttachmentInfo struct {
+	URL      string
+	FileName string
+	MimeType string
+}
+
+// SendMessageWithAttachments sends a message with file attachments to Chatwoot.
+func (w *Woot) SendMessageWithAttachments(accountID, convID int, content string, attachments []AttachmentInfo) error {
+	if len(attachments) == 0 {
+		return w.SendMessage(accountID, convID, content)
+	}
+
+	url := fmt.Sprintf("%s/api/v1/accounts/%d/conversations/%d/messages", w.URL, accountID, convID)
+
+	payload := map[string]interface{}{
+		"content":      content,
+		"message_type": "incoming",
+	}
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api_access_token", w.APIToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	// Now send attachments one by one
+	for _, att := range attachments {
+		if err := w.sendAttachment(accountID, convID, att); err != nil {
+			w.lg.Error("failed to send attachment", zap.String("url", att.URL), zap.Error(err))
+			// Continue with other attachments
+		}
+	}
+
+	return nil
+}
+
+// sendAttachment sends a single file attachment to Chatwoot.
+func (w *Woot) sendAttachment(accountID, convID int, att AttachmentInfo) error {
+	url := fmt.Sprintf("%s/api/v1/accounts/%d/conversations/%d/messages", w.URL, accountID, convID)
+
+	// Download the file first
+	resp, err := http.Get(att.URL)
+	if err != nil {
+		return fmt.Errorf("failed to download file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download file: HTTP %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read file data: %w", err)
+	}
+
+	// Create multipart form request
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add content field
+	writer.WriteField("content", "")
+	writer.WriteField("message_type", "incoming")
+
+	// Add file
+	part, err := writer.CreateFormFile("attachments[]", att.FileName)
+	if err != nil {
+		return fmt.Errorf("failed to create form file: %w", err)
+	}
+	part.Write(data)
+
+	writer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, url, body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("api_access_token", w.APIToken)
+
+	client := &http.Client{}
+	httpResp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("API returned status %d", httpResp.StatusCode)
 	}
 
 	return nil
