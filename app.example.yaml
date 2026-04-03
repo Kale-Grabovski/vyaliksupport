@@ -5,6 +5,7 @@ bot:
     #webhook:
     #url: https://domain.com/tg/wh
   #listen: 6688
+
 db:
   dsn: postgresql://user:pwd@127.0.0.1:5433/postgres?sslmode=disable
   dialect: postgres
