@@ -7,6 +7,8 @@ import (
 	"strings"
 	"syscall"
 
+	"vyaliksupport/internal/sender"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
@@ -57,6 +59,10 @@ func runBot(cmd *cobra.Command, args []string) error {
 		lg.Error("can't migrate", zap.Error(err))
 		return err
 	}
+
+	// Initialize Ntfy sender
+	ntfySender := sender.NewNtfySender(cfg.Ntfy.Topic, cfg.Ntfy.Token)
+	_ = ntfySender
 
 	b := bot.New(tb, cfg, repo, lg)
 

@@ -10,6 +10,12 @@ type Config struct {
 	Bot    Bot    `mapstructure:"bot"`
 	VpnBot VpnBot `mapstructure:"vpnbot"`
 	DB     DB     `mapstructure:"db"`
+	Ntfy   Ntfy   `mapstructure:"ntfy"`
+}
+
+type Ntfy struct {
+	Topic string `mapstructure:"topic"`
+	Token string `mapstructure:"token"`
 }
 
 type VpnBot struct {
