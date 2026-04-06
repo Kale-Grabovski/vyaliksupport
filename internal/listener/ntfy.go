@@ -130,9 +130,6 @@ func (l *NtfyListener) fetchMessages(ctx context.Context, since string) error {
 
 	for _, msg := range messages {
 		l.processMessage(&msg)
-		if msg.ID != "" {
-			lastMessageID = msg.ID
-		}
 	}
 
 	return nil
