@@ -14,10 +14,11 @@ type Config struct {
 }
 
 type Ntfy struct {
-	TopicIn    string `mapstructure:"topic_in"`
-	TopicOut   string `mapstructure:"topic_out"`
-	Token      string `mapstructure:"token"`
-	EncryptKey string `mapstructure:"encrypt_key"`
+	Token              string `mapstructure:"token"`
+	EncryptKey         string `mapstructure:"encrypt_key"`
+	TopicUserToGroup   string `mapstructure:"topic_user_to_group"` // user -> group (via bot)
+	TopicGroupToUser   string `mapstructure:"topic_group_to_user"` // group -> user (via bot)
+	TopicNotifications string `mapstructure:"topic_notifications"` // notify service
 }
 
 type VpnBot struct {
@@ -26,10 +27,11 @@ type VpnBot struct {
 }
 
 type Bot struct {
-	Token   string   `mapstructure:"token"`
-	GroupID int64    `mapstructure:"group_id"`
-	SubHost string   `mapstructure:"sub_host"`
-	Webhook *Webhook `mapstructure:"webhook"`
+	Token     string   `mapstructure:"token"`
+	GroupID   int64    `mapstructure:"group_id"`
+	ChannelID int64    `mapstructure:"channel_id"`
+	SubHost   string   `mapstructure:"sub_host"`
+	Webhook   *Webhook `mapstructure:"webhook"`
 }
 
 type Webhook struct {

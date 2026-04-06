@@ -62,9 +62,9 @@ func runBot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Initialize Ntfy sender (for topic-out) and listener (for topic-in).
-	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicOut, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
-	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicIn, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
+	// Initialize Ntfy sender (to group) and listener (from group).
+	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicGroupToUser, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
+	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicUserToGroup, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

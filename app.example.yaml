@@ -1,15 +1,19 @@
 bot:
-  token: 3242342434:34234324324
+  token: 1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
   group_id: -10033333333
+  channel_id: -10044444444
   sub_host: https://sub.example.com  # base URL for subscription links
-    #webhook:
-    #url: https://domain.com/tg/wh
+  #webhook:
+  #url: https://domain.com/tg/wh
   #listen: 6688
+
 db:
   dsn: postgresql://user:pwd@127.0.0.1:5433/postgres?sslmode=disable
   dialect: postgres
+
 ntfy:
-  topic_in: your_topic_for_bot    # bot listens to this (replies from group)
-  topic_out: your_topic_for_group # group listens to this (messages from bot)
   token: tk_xxx                   # ntfy access token (optional)
   encrypt_key: "your-32-byte-key-here!!!!" # 32-byte key for AES-256 (optional)
+  topic_user_to_group: your_topic_user_to_group   # user -> group (bot sends here)
+  topic_group_to_user: your_topic_group_to_user   # group -> user (bot listens here)
+  topic_notifications: your_topic_notifications   # notify service

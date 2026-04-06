@@ -74,82 +74,53 @@ func (b *Bot) sendReplyToUser(payload *domain.Payload) {
 	// Send the content based on type.
 	dst := telebot.ChatID(userChatID)
 
+	var err error
 	switch payload.Content.Type {
 	case domain.ContentTypeText:
-		if payload.Content.Text != "" {
-			_, err := b.tb.Send(dst, payload.Content.Text, &telebot.SendOptions{
-				ParseMode: telebot.ModeMarkdown,
-			})
-			if err != nil {
-				b.lg.Error("can't send text to user", zap.Error(err))
-			}
+		if payload.Content.Text == "" {
+			b.lg.Error(fmt.Sprintf("can't send %s to user, empty text", payload.Content.Type))
+			return
+		}
+		_, err = b.tb.Send(dst, payload.Content.Text, &telebot.SendOptions{
+			ParseMode: telebot.ModeMarkdown,
+		})
+
+	default:
+		if payload.Content.FileID == "" {
+			b.lg.Error(fmt.Sprintf("can't send %s to user, empty file_id", payload.Content.Type))
+			return
 		}
 
-	case domain.ContentTypePhoto:
-		if payload.Content.FileID != "" {
-			_, err := b.tb.Send(dst, &telebot.Photo{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-			if err != nil {
-				b.lg.Error("can't send photo to user", zap.Error(err))
-			}
-		}
-
-	case domain.ContentTypeVideo:
-		if payload.Content.FileID != "" {
-			_, err := b.tb.Send(dst, &telebot.Video{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-			if err != nil {
-				b.lg.Error("can't send video to user", zap.Error(err))
-			}
-		}
-
-	case domain.ContentTypeDocument:
-		if payload.Content.FileID != "" {
-			_, err := b.tb.Send(dst, &telebot.Document{
+		switch payload.Content.Type {
+		case domain.ContentTypePhoto:
+			_, err = b.tb.Send(dst, &telebot.Photo{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+		case domain.ContentTypeVideo:
+			_, err = b.tb.Send(dst, &telebot.Video{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+		case domain.ContentTypeDocument:
+			_, err = b.tb.Send(dst, &telebot.Document{
 				File:     telebot.File{FileID: payload.Content.FileID},
 				Caption:  payload.Content.Caption,
 				FileName: payload.Content.FileName,
 			})
-			if err != nil {
-				b.lg.Error("can't send document to user", zap.Error(err))
-			}
+		case domain.ContentTypeSticker:
+			_, err = b.tb.Send(dst, &telebot.Sticker{File: telebot.File{FileID: payload.Content.FileID}})
+		case domain.ContentTypeAudio:
+			_, err = b.tb.Send(dst, &telebot.Audio{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+		case domain.ContentTypeVoice:
+			_, err = b.tb.Send(dst, &telebot.Voice{File: telebot.File{FileID: payload.Content.FileID}})
+		case domain.ContentTypeAnimation:
+			_, err = b.tb.Send(dst, &telebot.Animation{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 		}
+	}
 
-	case domain.ContentTypeSticker:
-		if payload.Content.FileID != "" {
-			_, err := b.tb.Send(dst, &telebot.Sticker{File: telebot.File{FileID: payload.Content.FileID}})
-			if err != nil {
-				b.lg.Error("can't send sticker to user", zap.Error(err))
-			}
-		}
-
-	case domain.ContentTypeAudio:
-		if payload.Content.FileID != "" {
-			_, err := b.tb.Send(dst, &telebot.Audio{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-			if err != nil {
-				b.lg.Error("can't send audio to user", zap.Error(err))
-			}
-		}
-
-	case domain.ContentTypeVoice:
-		if payload.Content.FileID != "" {
-			_, err := b.tb.Send(dst, &telebot.Voice{File: telebot.File{FileID: payload.Content.FileID}})
-			if err != nil {
-				b.lg.Error("can't send voice to user", zap.Error(err))
-			}
-		}
-
-	case domain.ContentTypeAnimation:
-		if payload.Content.FileID != "" {
-			_, err := b.tb.Send(dst, &telebot.Animation{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-			if err != nil {
-				b.lg.Error("can't send animation to user", zap.Error(err))
-			}
-		}
+	if err != nil {
+		b.lg.Error(fmt.Sprintf("can't send %s to user", payload.Content.Type), zap.Error(err))
 	}
 }
 
 // RunCleanup periodically removes expired requests.
 func (b *Bot) RunCleanup(ctx context.Context, repo *postgres.Req, lg *zap.Logger) {
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -365,9 +336,9 @@ func (b *Bot) buildSummaryText(chatID int64) string {
 	summary, err := b.repo.GetUserSummary(chatID)
 	if err != nil {
 		b.lg.Error("can't get user summary", zap.Int64("tg_id", chatID), zap.Error(err))
-		return fmt.Sprintf("💬 Новое сообщение от `%d`", chatID)
+		return fmt.Sprintf("💬 New message from `%d`", chatID)
 	}
-	return "💬 *Новое обращение*\n\n" + summary.Format()
+	return "💬 *New message*\n\n" + summary.Format()
 }
 
 // faqKeyboard builds the inline keyboard for the FAQ menu.

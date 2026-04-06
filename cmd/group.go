@@ -20,8 +20,6 @@ import (
 	"gopkg.in/telebot.v4"
 )
 
-const defaultTTL = 72 * time.Hour
-
 var groupCmd = &cobra.Command{
 	Use:  "group",
 	RunE: runGroup,
@@ -60,9 +58,9 @@ func runGroup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Initialize Ntfy sender (for topic-in) and listener (for topic-out).
-	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicIn, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
-	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicOut, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
+	// Initialize Ntfy sender (to user via bot) and listener (from user via bot).
+	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicUserToGroup, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
+	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicGroupToUser, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
