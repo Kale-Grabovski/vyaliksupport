@@ -8,3 +8,8 @@ bot:
 db:
   dsn: postgresql://user:pwd@127.0.0.1:5433/postgres?sslmode=disable
   dialect: postgres
+ntfy:
+  topic_in: your_topic_for_bot    # bot listens to this (replies from group)
+  topic_out: your_topic_for_group # group listens to this (messages from bot)
+  token: tk_xxx                   # ntfy access token (optional)
+  encrypt_key: "your-32-byte-key-here!!!!" # 32-byte key for AES-256 (optional)

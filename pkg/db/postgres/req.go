@@ -3,6 +3,7 @@ package postgres
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"vyaliksupport/internal/domain"
 
@@ -19,9 +20,7 @@ func NewReq(db *sqlx.DB, subHost string) *Req {
 }
 
 func (d *Req) SaveRequest(supportMessageID int, userChatID int64) error {
-	query := "INSERT INTO tg_support_requests (support_message_id, user_chat_id) VALUES ($1, $2)"
-	_, err := d.db.Exec(query, supportMessageID, userChatID)
-	return err
+	return d.SaveRequestWithTTL(supportMessageID, userChatID, 72*time.Hour)
 }
 
 func (d *Req) FindUserChatID(supportMessageID int) (userChatID int64, err error) {
@@ -86,14 +85,17 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 
 func (d *Req) Migrate() error {
 	queries := []string{
+		`DROP TABLE IF EXISTS tg_support_requests`,
 		`CREATE TABLE IF NOT EXISTS tg_support_requests (
 			id SERIAL PRIMARY KEY,
 			support_message_id INTEGER NOT NULL,
 			user_chat_id BIGINT NOT NULL,
-			created_at TIMESTAMPTZ DEFAULT NOW()
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '72 hours')
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_support_message_id ON tg_support_requests(support_message_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_chat_id ON tg_support_requests(user_chat_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_expires_at ON tg_support_requests(expires_at)`,
 	}
 	for _, q := range queries {
 		if _, err := d.db.Exec(q); err != nil {
@@ -101,4 +103,20 @@ func (d *Req) Migrate() error {
 		}
 	}
 	return nil
+}
+
+// Cleanup removes requests that have expired.
+func (d *Req) Cleanup() (int64, error) {
+	result, err := d.db.Exec("DELETE FROM tg_support_requests WHERE expires_at < NOW()")
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// SaveRequestWithTTL creates a new request with a specific TTL.
+func (d *Req) SaveRequestWithTTL(supportMessageID int, userChatID int64, ttl time.Duration) error {
+	query := "INSERT INTO tg_support_requests (support_message_id, user_chat_id, expires_at) VALUES ($1, $2, NOW() + $3)"
+	_, err := d.db.Exec(query, supportMessageID, userChatID, ttl)
+	return err
 }

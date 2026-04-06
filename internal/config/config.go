@@ -14,8 +14,10 @@ type Config struct {
 }
 
 type Ntfy struct {
-	Topic string `mapstructure:"topic"`
-	Token string `mapstructure:"token"`
+	TopicIn    string `mapstructure:"topic_in"`
+	TopicOut   string `mapstructure:"topic_out"`
+	Token      string `mapstructure:"token"`
+	EncryptKey string `mapstructure:"encrypt_key"`
 }
 
 type VpnBot struct {

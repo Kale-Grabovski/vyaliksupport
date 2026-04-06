@@ -1,13 +1,19 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"vyaliksupport/internal/bot"
+	"vyaliksupport/internal/config"
+	"vyaliksupport/internal/domain"
+	"vyaliksupport/internal/listener"
 	"vyaliksupport/internal/sender"
+	"vyaliksupport/pkg/db/postgres"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
@@ -16,14 +22,10 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/telebot.v4"
-
-	"vyaliksupport/internal/bot"
-	"vyaliksupport/internal/config"
-	"vyaliksupport/pkg/db/postgres"
 )
 
 var botCmd = &cobra.Command{
-	Use:  "support",
+	Use:  "bot",
 	RunE: runBot,
 }
 
@@ -60,19 +62,35 @@ func runBot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Initialize Ntfy sender
-	ntfySender := sender.NewNtfySender(cfg.Ntfy.Topic, cfg.Ntfy.Token)
-	_ = ntfySender
+	// Initialize Ntfy sender (for topic-out) and listener (for topic-in).
+	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicOut, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
+	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicIn, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
 
-	b := bot.New(tb, cfg, repo, lg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := ntfyListener.Start(ctx); err != nil {
+		lg.Error("can't start ntfy listener", zap.Error(err))
+		return err
+	}
+	defer ntfyListener.Stop()
+
+	b := bot.New(tb, cfg, repo, ntfySender, lg)
+
+	// Handle incoming messages from ntfy (replies from group).
+	go b.HandleIncomingMessages(ctx, ntfyListener)
 
 	go b.Start()
 	lg.Info("Bot started")
+
+	// Start cleanup job.
+	go b.RunCleanup(ctx, repo, lg)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
+	cancel()
 	b.Stop()
 	lg.Info("Bot stopped")
 	return nil
@@ -112,3 +130,7 @@ func connectDB(dsn, dialect string) (*sqlx.DB, error) {
 	}
 	return db, nil
 }
+
+// Payload and Content are re-exported for convenience.
+type Payload = domain.Payload
+type Content = domain.Content

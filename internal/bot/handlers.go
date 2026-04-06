@@ -1,26 +1,32 @@
 package bot
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v4"
 
 	"vyaliksupport/internal/config"
+	"vyaliksupport/internal/domain"
+	"vyaliksupport/internal/listener"
+	"vyaliksupport/internal/sender"
 	"vyaliksupport/pkg/db/postgres"
 )
 
 // Bot holds all dependencies needed by the handlers.
 type Bot struct {
-	tb   *telebot.Bot
-	cfg  config.Config
-	repo *postgres.Req
-	lg   *zap.Logger
+	tb         *telebot.Bot
+	cfg        config.Config
+	repo       *postgres.Req
+	ntfySender *sender.NtfySender
+	lg         *zap.Logger
 }
 
 // New creates a Bot and registers all handlers.
-func New(tb *telebot.Bot, cfg config.Config, repo *postgres.Req, lg *zap.Logger) *Bot {
-	b := &Bot{tb: tb, cfg: cfg, repo: repo, lg: lg}
+func New(tb *telebot.Bot, cfg config.Config, repo *postgres.Req, ntfySender *sender.NtfySender, lg *zap.Logger) *Bot {
+	b := &Bot{tb: tb, cfg: cfg, repo: repo, ntfySender: ntfySender, lg: lg}
 	b.registerHandlers()
 	return b
 }
@@ -33,6 +39,132 @@ func (b *Bot) Start() {
 // Stop gracefully stops the bot.
 func (b *Bot) Stop() {
 	b.tb.Stop()
+}
+
+// HandleIncomingMessages processes messages received from ntfy (replies from group).
+func (b *Bot) HandleIncomingMessages(ctx context.Context, ntfyListener *listener.NtfyListener) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case payload := <-ntfyListener.Messages():
+			if payload == nil {
+				continue
+			}
+			if payload.Direction == domain.DirectionToUser {
+				b.sendReplyToUser(payload)
+			}
+		}
+	}
+}
+
+// sendReplyToUser sends a reply from support to the user.
+func (b *Bot) sendReplyToUser(payload *domain.Payload) {
+	userChatID := payload.UserChatID
+
+	// Send the header message first so the user knows a reply is coming.
+	if _, err := b.tb.Send(telebot.ChatID(userChatID), msgReplyHeader); err != nil {
+		b.lg.Error("can't send reply header to user",
+			zap.Int64("userChatID", userChatID),
+			zap.Error(err),
+		)
+		return
+	}
+
+	// Send the content based on type.
+	dst := telebot.ChatID(userChatID)
+
+	switch payload.Content.Type {
+	case domain.ContentTypeText:
+		if payload.Content.Text != "" {
+			_, err := b.tb.Send(dst, payload.Content.Text, &telebot.SendOptions{
+				ParseMode: telebot.ModeMarkdown,
+			})
+			if err != nil {
+				b.lg.Error("can't send text to user", zap.Error(err))
+			}
+		}
+
+	case domain.ContentTypePhoto:
+		if payload.Content.FileID != "" {
+			_, err := b.tb.Send(dst, &telebot.Photo{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			if err != nil {
+				b.lg.Error("can't send photo to user", zap.Error(err))
+			}
+		}
+
+	case domain.ContentTypeVideo:
+		if payload.Content.FileID != "" {
+			_, err := b.tb.Send(dst, &telebot.Video{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			if err != nil {
+				b.lg.Error("can't send video to user", zap.Error(err))
+			}
+		}
+
+	case domain.ContentTypeDocument:
+		if payload.Content.FileID != "" {
+			_, err := b.tb.Send(dst, &telebot.Document{
+				File:     telebot.File{FileID: payload.Content.FileID},
+				Caption:  payload.Content.Caption,
+				FileName: payload.Content.FileName,
+			})
+			if err != nil {
+				b.lg.Error("can't send document to user", zap.Error(err))
+			}
+		}
+
+	case domain.ContentTypeSticker:
+		if payload.Content.FileID != "" {
+			_, err := b.tb.Send(dst, &telebot.Sticker{File: telebot.File{FileID: payload.Content.FileID}})
+			if err != nil {
+				b.lg.Error("can't send sticker to user", zap.Error(err))
+			}
+		}
+
+	case domain.ContentTypeAudio:
+		if payload.Content.FileID != "" {
+			_, err := b.tb.Send(dst, &telebot.Audio{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			if err != nil {
+				b.lg.Error("can't send audio to user", zap.Error(err))
+			}
+		}
+
+	case domain.ContentTypeVoice:
+		if payload.Content.FileID != "" {
+			_, err := b.tb.Send(dst, &telebot.Voice{File: telebot.File{FileID: payload.Content.FileID}})
+			if err != nil {
+				b.lg.Error("can't send voice to user", zap.Error(err))
+			}
+		}
+
+	case domain.ContentTypeAnimation:
+		if payload.Content.FileID != "" {
+			_, err := b.tb.Send(dst, &telebot.Animation{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			if err != nil {
+				b.lg.Error("can't send animation to user", zap.Error(err))
+			}
+		}
+	}
+}
+
+// RunCleanup periodically removes expired requests.
+func (b *Bot) RunCleanup(ctx context.Context, repo *postgres.Req, lg *zap.Logger) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			deleted, err := repo.Cleanup()
+			if err != nil {
+				lg.Error("cleanup error", zap.Error(err))
+			} else if deleted > 0 {
+				lg.Info("cleanup", zap.Int64("deleted", deleted))
+			}
+		}
+	}
 }
 
 // registerHandlers wires up all telebot endpoints.
@@ -116,143 +248,115 @@ func (b *Bot) handleFAQBack(c telebot.Context) error {
 }
 
 // handleMessage is the main dispatcher for all incoming messages.
-// It routes based on context: group reply, persistent keyboard buttons,
-// commands, or plain user message to forward.
+// It routes based on context: persistent keyboard buttons, commands, or plain user message to forward.
 func (b *Bot) handleMessage(c telebot.Context) error {
 	msg := c.Message()
 
-	// Support group: operator is replying to a forwarded message.
-	if msg.Chat.ID == b.cfg.Bot.GroupID && msg.ReplyTo != nil {
-		return b.handleGroupReply(c)
+	// Ignore messages from the group (now handled via ntfy).
+	if msg.Chat.ID == b.cfg.Bot.GroupID {
+		return nil
 	}
 
-	if msg.Chat.ID != b.cfg.Bot.GroupID {
-		switch msg.Text {
-		case "/start", btnLabelHome:
-			return b.handleStart(c)
-		case "/faq", btnLabelFAQ:
-			return b.handleFAQ(c)
-		}
-
-		// Regular user message — forward to support group.
-		return b.handleUserMessage(c)
+	switch msg.Text {
+	case "/start", btnLabelHome:
+		return b.handleStart(c)
+	case "/faq", btnLabelFAQ:
+		return b.handleFAQ(c)
 	}
 
-	return nil
+	// Regular user message — send to support group via ntfy.
+	return b.handleUserMessage(c)
 }
 
-// handleGroupReply forwards an operator's reply back to the original user.
-func (b *Bot) handleGroupReply(c telebot.Context) error {
-	msg := c.Message()
-
-	userChatID, err := b.repo.FindUserChatID(msg.ReplyTo.ID)
-	if err != nil {
-		b.sendToGroup(msgReplyNotFound)
-		return nil
-	}
-
-	// Send the header message first so the user knows a reply is coming.
-	if _, err = b.tb.Send(telebot.ChatID(userChatID), msgReplyHeader); err != nil {
-		b.lg.Error("can't send reply header to user",
-			zap.Int64("userChatID", userChatID),
-			zap.Error(err),
-		)
-		b.sendToGroup(msgReplyUserBlocked)
-		return nil
-	}
-
-	// Forward the actual content depending on media type.
-	if err = b.forwardContentToUser(userChatID, msg); err != nil {
-		b.lg.Error("can't forward content to user",
-			zap.Int64("userChatID", userChatID),
-			zap.Error(err),
-		)
-		b.sendToGroup(msgReplyUserBlocked)
-		return nil
-	}
-
-	b.sendToGroup(msgReplySentOK)
-	return nil
-}
-
-// forwardContentToUser sends the correct media type to the user.
-func (b *Bot) forwardContentToUser(userChatID int64, msg *telebot.Message) error {
-	dst := telebot.ChatID(userChatID)
-
-	switch {
-	case msg.Text != "":
-		_, err := b.tb.Send(dst, msg.Text, &telebot.SendOptions{
-			ParseMode: telebot.ModeMarkdown,
-		})
-		return err
-
-	case msg.Photo != nil:
-		_, err := b.tb.Send(dst, &telebot.Photo{File: msg.Photo.File, Caption: msg.Caption})
-		return err
-
-	case msg.Video != nil:
-		_, err := b.tb.Send(dst, &telebot.Video{File: msg.Video.File, Caption: msg.Caption})
-		return err
-
-	case msg.Document != nil:
-		_, err := b.tb.Send(dst, &telebot.Document{
-			File:     msg.Document.File,
-			Caption:  msg.Caption,
-			FileName: msg.Document.FileName,
-		})
-		return err
-
-	case msg.Sticker != nil:
-		_, err := b.tb.Send(dst, &telebot.Sticker{File: msg.Sticker.File})
-		return err
-
-	case msg.Audio != nil:
-		_, err := b.tb.Send(dst, &telebot.Audio{File: msg.Audio.File, Caption: msg.Caption})
-		return err
-
-	case msg.Voice != nil:
-		_, err := b.tb.Send(dst, &telebot.Voice{File: msg.Voice.File})
-		return err
-
-	case msg.Animation != nil:
-		_, err := b.tb.Send(dst, &telebot.Animation{File: msg.Animation.File, Caption: msg.Caption})
-		return err
-
-	default:
-		b.sendToGroup(msgUnsupportedType)
-		return nil
-	}
-}
-
-// handleUserMessage forwards a user's message to the support group.
+// handleUserMessage forwards a user's message to the support group via ntfy.
 func (b *Bot) handleUserMessage(c telebot.Context) error {
 	msg := c.Message()
 
-	// Build the user summary card shown above the forwarded message.
+	// Build the user summary card.
 	summaryText := b.buildSummaryText(msg.Chat.ID)
 
-	if _, err := b.tb.Send(
-		telebot.ChatID(b.cfg.Bot.GroupID),
-		summaryText,
-		&telebot.SendOptions{ParseMode: telebot.ModeMarkdown},
-	); err != nil {
-		b.lg.Error("can't send summary to group", zap.Error(err))
+	// Determine content type and extract file info.
+	content := b.extractContent(msg)
+
+	// Create payload.
+	payload := &domain.Payload{
+		Direction:  domain.DirectionToGroup,
+		UserChatID: msg.Chat.ID,
+		MsgID:      msg.ID,
+		Summary:    summaryText,
+		Content:    content,
+		CreatedAt:  time.Now(),
 	}
 
-	forwardedMsg, err := b.tb.Forward(telebot.ChatID(b.cfg.Bot.GroupID), msg)
+	// Send to ntfy.
+	data, err := payload.Marshal()
 	if err != nil {
-		b.lg.Error("can't forward message to group", zap.Error(err))
+		b.lg.Error("can't marshal payload", zap.Error(err))
 		return c.Send("Не удалось отослать сообщение. Попробуйте ещё раз.")
 	}
 
-	if err = b.repo.SaveRequest(forwardedMsg.ID, msg.Chat.ID); err != nil {
-		b.lg.Error("can't save support request",
-			zap.String("text", msg.Text),
-			zap.Error(err),
-		)
+	if err := b.ntfySender.SendPayload(context.Background(), data); err != nil {
+		b.lg.Error("can't send to ntfy", zap.Error(err))
+		return c.Send("Не удалось отослать сообщение. Попробуйте ещё раз.")
+	}
+
+	// We need to track this message for replies.
+	// Since we're not getting a real message ID from the group anymore,
+	// we'll use the original message ID as a reference.
+	// The group handler will store the user_chat_id -> original_msg_id mapping.
+	// Actually, we need to save the user's message ID so the group can reference it.
+	if err := b.repo.SaveRequest(int(msg.ID), msg.Chat.ID); err != nil {
+		b.lg.Error("can't save support request", zap.Error(err))
 	}
 
 	return c.Send(msgSentToSupport)
+}
+
+// extractContent extracts content from a telebot.Message.
+func (b *Bot) extractContent(msg *telebot.Message) domain.Content {
+	content := domain.Content{Type: domain.ContentTypeText}
+
+	switch {
+	case msg.Text != "":
+		content.Type = domain.ContentTypeText
+		content.Text = msg.Text
+
+	case msg.Photo != nil:
+		content.Type = domain.ContentTypePhoto
+		content.FileID = msg.Photo.File.FileID
+		content.Caption = msg.Caption
+
+	case msg.Video != nil:
+		content.Type = domain.ContentTypeVideo
+		content.FileID = msg.Video.File.FileID
+		content.Caption = msg.Caption
+
+	case msg.Document != nil:
+		content.Type = domain.ContentTypeDocument
+		content.FileID = msg.Document.File.FileID
+		content.Caption = msg.Caption
+		content.FileName = msg.Document.FileName
+
+	case msg.Sticker != nil:
+		content.Type = domain.ContentTypeSticker
+		content.FileID = msg.Sticker.File.FileID
+
+	case msg.Audio != nil:
+		content.Type = domain.ContentTypeAudio
+		content.FileID = msg.Audio.File.FileID
+		content.Caption = msg.Caption
+
+	case msg.Voice != nil:
+		content.Type = domain.ContentTypeVoice
+		content.FileID = msg.Voice.File.FileID
+
+	case msg.Animation != nil:
+		content.Type = domain.ContentTypeAnimation
+		content.FileID = msg.Animation.File.FileID
+		content.Caption = msg.Caption
+	}
+
+	return content
 }
 
 // buildSummaryText returns a formatted user card for the support group.
@@ -264,13 +368,6 @@ func (b *Bot) buildSummaryText(chatID int64) string {
 		return fmt.Sprintf("💬 Новое сообщение от `%d`", chatID)
 	}
 	return "💬 *Новое обращение*\n\n" + summary.Format()
-}
-
-// sendToGroup sends a plain text message to the support group, logging errors.
-func (b *Bot) sendToGroup(text string) {
-	if _, err := b.tb.Send(telebot.ChatID(b.cfg.Bot.GroupID), text); err != nil {
-		b.lg.Error("can't send message to group", zap.Error(err))
-	}
 }
 
 // faqKeyboard builds the inline keyboard for the FAQ menu.
