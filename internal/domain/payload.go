@@ -24,13 +24,14 @@ const (
 
 // Payload is the message structure exchanged between bot and group via ntfy.
 type Payload struct {
-	Direction  string    `json:"direction"` // "to_group" | "to_user" | "ack"
-	UserChatID int64     `json:"user_chat_id"`
-	MsgID      int       `json:"msg_id"`       // message ID in bot (for reply)
-	GroupMsgID int       `json:"group_msg_id"` // message ID in group (for reply lookup)
-	Summary    string    `json:"summary"`      // user summary
-	Content    Content   `json:"content"`      // text/media
-	CreatedAt  time.Time `json:"created_at"`
+	Direction        string    `json:"direction"` // "to_group" | "to_user" | "ack"
+	UserChatID       int64     `json:"user_chat_id"`
+	MsgID            int       `json:"msg_id"`             // message ID in bot (for reply)
+	GroupMsgID       int       `json:"group_msg_id"`       // message ID in group (for reply lookup)
+	SupportGroupChat int64     `json:"support_group_chat"` // group chat ID for copy operations
+	Summary          string    `json:"summary"`            // user summary
+	Content          Content   `json:"content"`            // text/media
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // Content holds the message content (text or media).

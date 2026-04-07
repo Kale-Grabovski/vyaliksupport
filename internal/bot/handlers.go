@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -51,6 +52,12 @@ func (b *Bot) HandleIncomingMessages(ctx context.Context, ntfyListener *listener
 			if payload == nil {
 				continue
 			}
+			b.lg.Info("ntfy received", zap.Int64("userChatID", payload.UserChatID), zap.String("direction", payload.Direction), zap.Int("groupMsgID", payload.GroupMsgID))
+			// Ignore invalid payloads - userChatID should be positive (not a group).
+			if payload.UserChatID < 0 {
+				b.lg.Warn("ignoring payload with negative userChatID (likely group echo)", zap.Int64("userChatID", payload.UserChatID))
+				continue
+			}
 			switch payload.Direction {
 			case domain.DirectionToUser:
 				b.sendReplyToUser(payload)
@@ -94,36 +101,32 @@ func (b *Bot) sendReplyToUser(payload *domain.Payload) {
 		})
 
 	default:
-		if payload.Content.FileID == "" {
-			b.lg.Error(fmt.Sprintf("can't send %s to user, empty file_id", payload.Content.Type))
+		if payload.GroupMsgID == 0 {
+			b.lg.Error(fmt.Sprintf("can't send %s to user, missing group_msg_id", payload.Content.Type))
 			return
 		}
 
-		switch payload.Content.Type {
-		case domain.ContentTypePhoto:
-			_, err = b.tb.Send(dst, &telebot.Photo{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-		case domain.ContentTypeVideo:
-			_, err = b.tb.Send(dst, &telebot.Video{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-		case domain.ContentTypeDocument:
-			_, err = b.tb.Send(dst, &telebot.Document{
-				File:     telebot.File{FileID: payload.Content.FileID},
-				Caption:  payload.Content.Caption,
-				FileName: payload.Content.FileName,
-			})
-		case domain.ContentTypeSticker:
-			_, err = b.tb.Send(dst, &telebot.Sticker{File: telebot.File{FileID: payload.Content.FileID}})
-		case domain.ContentTypeAudio:
-			_, err = b.tb.Send(dst, &telebot.Audio{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-		case domain.ContentTypeVoice:
-			_, err = b.tb.Send(dst, &telebot.Voice{File: telebot.File{FileID: payload.Content.FileID}})
-		case domain.ContentTypeAnimation:
-			_, err = b.tb.Send(dst, &telebot.Animation{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
-		}
+		b.lg.Info("attempting copy", zap.Int("groupMsgID", payload.GroupMsgID), zap.Int64("supportGroupChat", payload.SupportGroupChat), zap.String("contentType", payload.Content.Type))
+
+		// Use Copy to forward message from group to user.
+		// Copy works between different chats unlike FileID which is per-chat.
+		msgToCopy := &messageRef{msgID: strconv.Itoa(payload.GroupMsgID), chatID: payload.SupportGroupChat}
+		_, err = b.tb.Copy(dst, msgToCopy)
 	}
 
 	if err != nil {
 		b.lg.Error(fmt.Sprintf("can't send %s to user", payload.Content.Type), zap.Error(err))
 	}
+}
+
+// messageRef implements telebot.Editable for Copy operations.
+type messageRef struct {
+	msgID  string
+	chatID int64
+}
+
+func (m *messageRef) MessageSig() (string, int64) {
+	return m.msgID, m.chatID
 }
 
 // RunCleanup periodically removes expired requests.
@@ -278,6 +281,8 @@ func (b *Bot) handleUserMessage(c telebot.Context) error {
 		b.lg.Error("can't send to ntfy", zap.Error(err))
 		return c.Send("Не удалось отослать сообщение. Попробуйте ещё раз.")
 	}
+
+	b.lg.Info("sending support request", zap.Int("msgID", msg.ID), zap.Int64("chatID", msg.Chat.ID))
 
 	// We need to track this message for replies.
 	// Since we're not getting a real message ID from the group anymore,

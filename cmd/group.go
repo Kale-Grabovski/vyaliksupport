@@ -126,9 +126,13 @@ func (g *groupHandler) handleIncomingMessages(ctx context.Context) {
 
 // forwardToGroup sends the payload content to the TG group.
 func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
-	// If there's a summary, we need to save its message ID for reply tracking.
-	// Users typically reply to the summary, not the content below it.
-	var summaryMsgID int
+	g.lg.Info("forwardToGroup received", zap.Int64("userChatID", payload.UserChatID), zap.String("direction", payload.Direction), zap.String("summary", payload.Summary))
+
+	// Ignore invalid payloads - userChatID should be positive (not a group).
+	if payload.UserChatID < 0 {
+		g.lg.Warn("ignoring payload with negative userChatID (likely group echo)", zap.Int64("userChatID", payload.UserChatID))
+		return
+	}
 
 	if payload.Summary != "" {
 		msg, err := g.tb.Send(telebot.ChatID(g.groupID), payload.Summary, &telebot.SendOptions{
@@ -137,8 +141,8 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 		if err != nil {
 			g.lg.Error("can't send summary to group", zap.Error(err))
 		} else {
-			summaryMsgID = msg.ID
 			// Always save mapping for summary - users reply to it.
+			g.lg.Info("saving group message mapping (summary)", zap.Int("groupMsgID", msg.ID), zap.Int64("userChatID", payload.UserChatID))
 			if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 				g.lg.Error("can't save group message mapping", zap.Error(err))
 			}
@@ -157,8 +161,8 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send text to group", zap.Error(err))
 			}
-			// If no summary was sent, save mapping for content.
-			if summaryMsgID == 0 && msg != nil {
+			// Always save mapping for content message (to allow reply to it).
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -171,7 +175,7 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send photo to group", zap.Error(err))
 			}
-			if summaryMsgID == 0 && msg != nil {
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -184,7 +188,7 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send video to group", zap.Error(err))
 			}
-			if summaryMsgID == 0 && msg != nil {
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -201,7 +205,7 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send document to group", zap.Error(err))
 			}
-			if summaryMsgID == 0 && msg != nil {
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -214,7 +218,7 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send sticker to group", zap.Error(err))
 			}
-			if summaryMsgID == 0 && msg != nil {
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -227,7 +231,7 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send audio to group", zap.Error(err))
 			}
-			if summaryMsgID == 0 && msg != nil {
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -240,7 +244,7 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send voice to group", zap.Error(err))
 			}
-			if summaryMsgID == 0 && msg != nil {
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -253,7 +257,7 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			if err != nil {
 				g.lg.Error("can't send animation to group", zap.Error(err))
 			}
-			if summaryMsgID == 0 && msg != nil {
+			if msg != nil {
 				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
 					g.lg.Error("can't save group message mapping", zap.Error(err))
 				}
@@ -279,13 +283,17 @@ func (g *groupHandler) registerHandlers() {
 func (g *groupHandler) handleGroupMessage(c telebot.Context) error {
 	msg := c.Message()
 
+	g.lg.Info("handleGroupMessage called", zap.Int64("msgChatID", msg.Chat.ID), zap.Int64("groupID", g.groupID), zap.Bool("isReply", msg.ReplyTo != nil))
+
 	// Only handle messages in the group.
 	if msg.Chat.ID != g.groupID {
+		g.lg.Info("ignored: not in group", zap.Int64("msgChatID", msg.Chat.ID), zap.Int64("groupID", g.groupID))
 		return nil
 	}
 
 	// Only handle replies.
 	if msg.ReplyTo == nil {
+		g.lg.Info("ignored: not a reply")
 		return nil
 	}
 
@@ -345,20 +353,26 @@ func (g *groupHandler) handleGroupMedia(c telebot.Context) error {
 func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fileID, caption, fileName string) error {
 	msg := c.Message()
 
+	g.lg.Info("handling group reply", zap.Int("replyToID", msg.ReplyTo.ID), zap.Int64("groupID", g.groupID))
+
 	// Find user_chat_id by the group message we're replying to.
 	userChatID, err := g.repo.FindUserChatIDByGroupMsg(msg.ReplyTo.ID)
 	if err != nil {
-		if _, err := g.tb.Send(telebot.ChatID(g.groupID), "❌ can't find user"); err != nil {
+		g.lg.Error("can't find user chat ID", zap.Int("replyToID", msg.ReplyTo.ID), zap.Error(err))
+		if _, err := g.tb.Send(telebot.ChatID(g.groupID), fmt.Sprintf("❌ can't find user (reply_to=%d)", msg.ReplyTo.ID)); err != nil {
 			g.lg.Error("can't send error to group", zap.Error(err))
 		}
 		return nil
 	}
 
+	g.lg.Info("found userChatID", zap.Int64("userChatID", userChatID), zap.Int64("groupID", g.groupID))
+
 	// Create payload to send back to bot.
 	payload := &bot.Payload{
-		Direction:  bot.DirectionToUser,
-		UserChatID: userChatID,
-		GroupMsgID: msg.ReplyTo.ID, // This helps bot find the group message ID for mapping.
+		Direction:        bot.DirectionToUser,
+		UserChatID:       userChatID,
+		GroupMsgID:       msg.ReplyTo.ID, // This helps bot find the group message ID for mapping.
+		SupportGroupChat: g.groupID,      // Needed for Copy operation in bot.
 		Content: bot.Content{
 			Type:     contentType,
 			Text:     text,
@@ -375,6 +389,8 @@ func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fi
 		g.lg.Error("can't marshal payload", zap.Error(err))
 		return err
 	}
+
+	g.lg.Info("sending to ntfy", zap.String("contentType", payload.Content.Type), zap.Int64("userChatID", payload.UserChatID), zap.Int("groupMsgID", payload.GroupMsgID), zap.Int64("supportGroupChat", payload.SupportGroupChat))
 
 	if err := g.ntfySender.SendPayload(context.Background(), data); err != nil {
 		g.lg.Error("can't send payload to ntfy", zap.Error(err))
