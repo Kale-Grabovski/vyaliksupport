@@ -126,12 +126,17 @@ func (g *groupHandler) handleIncomingMessages(ctx context.Context) {
 
 // forwardToGroup sends the payload content to the TG group.
 func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
+	var groupMsgID int
+
 	// Send summary first.
 	if payload.Summary != "" {
-		if _, err := g.tb.Send(telebot.ChatID(g.groupID), payload.Summary, &telebot.SendOptions{
+		msg, err := g.tb.Send(telebot.ChatID(g.groupID), payload.Summary, &telebot.SendOptions{
 			ParseMode: telebot.ModeMarkdown,
-		}); err != nil {
+		})
+		if err != nil {
 			g.lg.Error("can't send summary to group", zap.Error(err))
+		} else {
+			groupMsgID = msg.ID
 		}
 	}
 
@@ -141,72 +146,95 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 	switch payload.Content.Type {
 	case bot.ContentTypeText:
 		if payload.Content.Text != "" {
-			_, err := g.tb.Send(dst, payload.Content.Text, &telebot.SendOptions{
+			msg, err := g.tb.Send(dst, payload.Content.Text, &telebot.SendOptions{
 				ParseMode: telebot.ModeMarkdown,
 			})
 			if err != nil {
 				g.lg.Error("can't send text to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
 		}
 
 	case bot.ContentTypePhoto:
 		if payload.Content.FileID != "" {
-			_, err := g.tb.Send(dst, &telebot.Photo{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			msg, err := g.tb.Send(dst, &telebot.Photo{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send photo to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
 		}
 
 	case bot.ContentTypeVideo:
 		if payload.Content.FileID != "" {
-			_, err := g.tb.Send(dst, &telebot.Video{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			msg, err := g.tb.Send(dst, &telebot.Video{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send video to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
 		}
 
 	case bot.ContentTypeDocument:
 		if payload.Content.FileID != "" {
-			_, err := g.tb.Send(dst, &telebot.Document{
+			msg, err := g.tb.Send(dst, &telebot.Document{
 				File:     telebot.File{FileID: payload.Content.FileID},
 				Caption:  payload.Content.Caption,
 				FileName: payload.Content.FileName,
 			})
 			if err != nil {
 				g.lg.Error("can't send document to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
 		}
 
 	case bot.ContentTypeSticker:
 		if payload.Content.FileID != "" {
-			_, err := g.tb.Send(dst, &telebot.Sticker{File: telebot.File{FileID: payload.Content.FileID}})
+			msg, err := g.tb.Send(dst, &telebot.Sticker{File: telebot.File{FileID: payload.Content.FileID}})
 			if err != nil {
 				g.lg.Error("can't send sticker to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
 		}
 
 	case bot.ContentTypeAudio:
 		if payload.Content.FileID != "" {
-			_, err := g.tb.Send(dst, &telebot.Audio{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			msg, err := g.tb.Send(dst, &telebot.Audio{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send audio to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
 		}
 
 	case bot.ContentTypeVoice:
 		if payload.Content.FileID != "" {
-			_, err := g.tb.Send(dst, &telebot.Voice{File: telebot.File{FileID: payload.Content.FileID}})
+			msg, err := g.tb.Send(dst, &telebot.Voice{File: telebot.File{FileID: payload.Content.FileID}})
 			if err != nil {
 				g.lg.Error("can't send voice to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
 		}
 
 	case bot.ContentTypeAnimation:
 		if payload.Content.FileID != "" {
-			_, err := g.tb.Send(dst, &telebot.Animation{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
+			msg, err := g.tb.Send(dst, &telebot.Animation{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send animation to group", zap.Error(err))
+			} else {
+				groupMsgID = msg.ID
 			}
+		}
+	}
+
+	// Save mapping: group_message_id -> user_chat_id locally (group's own DB).
+	if groupMsgID > 0 {
+		if err := g.repo.SaveGroupMessage(groupMsgID, payload.UserChatID); err != nil {
+			g.lg.Error("can't save group message mapping", zap.Error(err))
 		}
 	}
 }
@@ -294,8 +322,8 @@ func (g *groupHandler) handleGroupMedia(c telebot.Context) error {
 func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fileID, caption, fileName string) error {
 	msg := c.Message()
 
-	// Find user_chat_id by the message we're replying to.
-	userChatID, err := g.repo.FindUserChatID(msg.ReplyTo.ID)
+	// Find user_chat_id by the group message we're replying to.
+	userChatID, err := g.repo.FindUserChatIDByGroupMsg(msg.ReplyTo.ID)
 	if err != nil {
 		if _, err := g.tb.Send(telebot.ChatID(g.groupID), "❌ can't find user"); err != nil {
 			g.lg.Error("can't send error to group", zap.Error(err))

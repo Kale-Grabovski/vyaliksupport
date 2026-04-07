@@ -22,6 +22,22 @@ func (d *Req) SaveRequest(supportMessageID int, userChatID int64) error {
 	return d.SaveRequestWithTTL(supportMessageID, userChatID)
 }
 
+// SaveGroupMessage stores the mapping: group_message_id -> user_chat_id.
+// This is needed to find the user when support replies in the group.
+func (d *Req) SaveGroupMessage(groupMessageID int, userChatID int64) error {
+	query := "INSERT INTO tg_support_requests (group_message_id, user_chat_id) VALUES ($1, $2)"
+	_, err := d.db.Exec(query, groupMessageID, userChatID)
+	return err
+}
+
+// FindUserChatIDByGroupMsg finds user_chat_id by the message in the group.
+func (d *Req) FindUserChatIDByGroupMsg(groupMessageID int) (userChatID int64, err error) {
+	query := "SELECT user_chat_id FROM tg_support_requests WHERE group_message_id = $1"
+	err = d.db.QueryRow(query, groupMessageID).Scan(&userChatID)
+	return
+}
+
+// FindUserChatID finds user_chat_id by the original user message ID (legacy).
 func (d *Req) FindUserChatID(supportMessageID int) (userChatID int64, err error) {
 	query := "SELECT user_chat_id FROM tg_support_requests WHERE support_message_id = $1"
 	err = d.db.QueryRow(query, supportMessageID).Scan(&userChatID)
@@ -87,12 +103,14 @@ func (d *Req) Migrate() error {
 		`DROP TABLE IF EXISTS tg_support_requests`,
 		`CREATE TABLE IF NOT EXISTS tg_support_requests (
 			id bigserial PRIMARY KEY,
-			support_message_id bigint NOT NULL,
+			support_message_id bigint NOT NULL DEFAULT 0,
+			group_message_id bigint NOT NULL DEFAULT 0,
 			user_chat_id bigint NOT NULL,
 			created_at timestamptz DEFAULT now(),
 			expires_at timestamptz NOT NULL DEFAULT now() + INTERVAL '72 hours'
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_support_message_id ON tg_support_requests(support_message_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_group_message_id ON tg_support_requests(group_message_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_chat_id ON tg_support_requests(user_chat_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_expires_at ON tg_support_requests(expires_at)`,
 	}

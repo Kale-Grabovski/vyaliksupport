@@ -7,6 +7,7 @@ import (
 const (
 	DirectionToGroup = domain.DirectionToGroup
 	DirectionToUser  = domain.DirectionToUser
+	DirectionAck     = domain.DirectionAck
 )
 
 const (

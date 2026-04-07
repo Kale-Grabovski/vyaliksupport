@@ -51,8 +51,16 @@ func (b *Bot) HandleIncomingMessages(ctx context.Context, ntfyListener *listener
 			if payload == nil {
 				continue
 			}
-			if payload.Direction == domain.DirectionToUser {
+			switch payload.Direction {
+			case domain.DirectionToUser:
 				b.sendReplyToUser(payload)
+			case domain.DirectionAck:
+				// Save group_message_id -> user_chat_id mapping.
+				if payload.GroupMsgID > 0 {
+					if err := b.repo.SaveGroupMessage(payload.GroupMsgID, payload.UserChatID); err != nil {
+						b.lg.Error("can't save group message mapping", zap.Error(err))
+					}
+				}
 			}
 		}
 	}
