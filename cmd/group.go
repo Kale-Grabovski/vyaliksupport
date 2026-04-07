@@ -52,9 +52,9 @@ func runGroup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Initialize Ntfy sender (to user via bot) and listener (from user via bot).
-	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicUserToGroup, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
-	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicGroupToUser, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
+	// Initialize Ntfy sender (to bot) and listener (from bot).
+	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicGroupToUser, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
+	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicUserToGroup, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -126,9 +126,10 @@ func (g *groupHandler) handleIncomingMessages(ctx context.Context) {
 
 // forwardToGroup sends the payload content to the TG group.
 func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
-	var groupMsgID int
+	// If there's a summary, we need to save its message ID for reply tracking.
+	// Users typically reply to the summary, not the content below it.
+	var summaryMsgID int
 
-	// Send summary first.
 	if payload.Summary != "" {
 		msg, err := g.tb.Send(telebot.ChatID(g.groupID), payload.Summary, &telebot.SendOptions{
 			ParseMode: telebot.ModeMarkdown,
@@ -136,7 +137,11 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 		if err != nil {
 			g.lg.Error("can't send summary to group", zap.Error(err))
 		} else {
-			groupMsgID = msg.ID
+			summaryMsgID = msg.ID
+			// Always save mapping for summary - users reply to it.
+			if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+				g.lg.Error("can't save group message mapping", zap.Error(err))
+			}
 		}
 	}
 
@@ -151,8 +156,12 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			})
 			if err != nil {
 				g.lg.Error("can't send text to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
+			}
+			// If no summary was sent, save mapping for content.
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
 			}
 		}
 
@@ -161,8 +170,11 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			msg, err := g.tb.Send(dst, &telebot.Photo{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send photo to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
+			}
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
 			}
 		}
 
@@ -171,8 +183,11 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			msg, err := g.tb.Send(dst, &telebot.Video{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send video to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
+			}
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
 			}
 		}
 
@@ -185,8 +200,11 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			})
 			if err != nil {
 				g.lg.Error("can't send document to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
+			}
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
 			}
 		}
 
@@ -195,8 +213,11 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			msg, err := g.tb.Send(dst, &telebot.Sticker{File: telebot.File{FileID: payload.Content.FileID}})
 			if err != nil {
 				g.lg.Error("can't send sticker to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
+			}
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
 			}
 		}
 
@@ -205,8 +226,11 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			msg, err := g.tb.Send(dst, &telebot.Audio{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send audio to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
+			}
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
 			}
 		}
 
@@ -215,8 +239,11 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			msg, err := g.tb.Send(dst, &telebot.Voice{File: telebot.File{FileID: payload.Content.FileID}})
 			if err != nil {
 				g.lg.Error("can't send voice to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
+			}
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
 			}
 		}
 
@@ -225,16 +252,12 @@ func (g *groupHandler) forwardToGroup(payload *bot.Payload) {
 			msg, err := g.tb.Send(dst, &telebot.Animation{File: telebot.File{FileID: payload.Content.FileID}, Caption: payload.Content.Caption})
 			if err != nil {
 				g.lg.Error("can't send animation to group", zap.Error(err))
-			} else {
-				groupMsgID = msg.ID
 			}
-		}
-	}
-
-	// Save mapping: group_message_id -> user_chat_id locally (group's own DB).
-	if groupMsgID > 0 {
-		if err := g.repo.SaveGroupMessage(groupMsgID, payload.UserChatID); err != nil {
-			g.lg.Error("can't save group message mapping", zap.Error(err))
+			if summaryMsgID == 0 && msg != nil {
+				if err := g.repo.SaveGroupMessage(msg.ID, payload.UserChatID); err != nil {
+					g.lg.Error("can't save group message mapping", zap.Error(err))
+				}
+			}
 		}
 	}
 }
@@ -335,7 +358,7 @@ func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fi
 	payload := &bot.Payload{
 		Direction:  bot.DirectionToUser,
 		UserChatID: userChatID,
-		MsgID:      msg.ReplyTo.ID, // This helps bot find which message to reply to.
+		GroupMsgID: msg.ReplyTo.ID, // This helps bot find the group message ID for mapping.
 		Content: bot.Content{
 			Type:     contentType,
 			Text:     text,
