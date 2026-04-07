@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -72,6 +73,7 @@ func runGroup(cmd *cobra.Command, args []string) error {
 		repo:         repo,
 		ntfySender:   ntfySender,
 		ntfyListener: ntfyListener,
+		fileUploader: sender.NewFileUploader(),
 		lg:           lg,
 	}
 
@@ -106,6 +108,7 @@ type groupHandler struct {
 	repo         *postgres.Req
 	ntfySender   *sender.NtfySender
 	ntfyListener *listener.NtfyListener
+	fileUploader *sender.FileUploader
 	lg           *zap.Logger
 }
 
@@ -353,7 +356,7 @@ func (g *groupHandler) handleGroupMedia(c telebot.Context) error {
 func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fileID, caption, fileName string) error {
 	msg := c.Message()
 
-	g.lg.Info("handling group reply", zap.Int("replyToID", msg.ReplyTo.ID), zap.Int64("groupID", g.groupID))
+	g.lg.Info("handling group reply", zap.Int("replyToID", msg.ReplyTo.ID), zap.Int64("groupID", g.groupID), zap.String("contentType", contentType))
 
 	// Find user_chat_id by the group message we're replying to.
 	userChatID, err := g.repo.FindUserChatIDByGroupMsg(msg.ReplyTo.ID)
@@ -367,12 +370,42 @@ func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fi
 
 	g.lg.Info("found userChatID", zap.Int64("userChatID", userChatID), zap.Int64("groupID", g.groupID))
 
+	// For media, download from group and upload to file.io
+	downloadURL := ""
+	if fileID != "" && contentType != bot.ContentTypeText {
+		g.lg.Info("uploading media to file.io", zap.String("contentType", contentType))
+
+		// Download file from group
+		tmpFile, err := g.downloadMedia(fileID)
+		if err != nil {
+			g.lg.Error("can't download media", zap.Error(err))
+			if _, err := g.tb.Send(telebot.ChatID(g.groupID), "❌ can't download media"); err != nil {
+				g.lg.Error("can't send error to group", zap.Error(err))
+			}
+			return nil
+		}
+		defer os.Remove(tmpFile)
+
+		// Upload to file.io (max 10MB)
+		url, err := g.fileUploader.UploadFile(tmpFile, 10*1024*1024)
+		if err != nil {
+			g.lg.Error("can't upload to file.io", zap.Error(err))
+			if _, err := g.tb.Send(telebot.ChatID(g.groupID), "❌ файл слишком большой (макс 10MB)"); err != nil {
+				g.lg.Error("can't send error to group", zap.Error(err))
+			}
+			return nil
+		}
+		downloadURL = url
+		g.lg.Info("uploaded to file.io", zap.String("url", url))
+	}
+
 	// Create payload to send back to bot.
 	payload := &bot.Payload{
 		Direction:        bot.DirectionToUser,
 		UserChatID:       userChatID,
-		GroupMsgID:       msg.ReplyTo.ID, // This helps bot find the group message ID for mapping.
-		SupportGroupChat: g.groupID,      // Needed for Copy operation in bot.
+		GroupMsgID:       msg.ReplyTo.ID,
+		SupportGroupChat: g.groupID,
+		DownloadURL:      downloadURL,
 		Content: bot.Content{
 			Type:     contentType,
 			Text:     text,
@@ -390,7 +423,7 @@ func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fi
 		return err
 	}
 
-	g.lg.Info("sending to ntfy", zap.String("contentType", payload.Content.Type), zap.Int64("userChatID", payload.UserChatID), zap.Int("groupMsgID", payload.GroupMsgID), zap.Int64("supportGroupChat", payload.SupportGroupChat))
+	g.lg.Info("sending to ntfy", zap.String("contentType", payload.Content.Type), zap.Int64("userChatID", payload.UserChatID), zap.Int("groupMsgID", payload.GroupMsgID), zap.String("downloadURL", downloadURL))
 
 	if err := g.ntfySender.SendPayload(context.Background(), data); err != nil {
 		g.lg.Error("can't send payload to ntfy", zap.Error(err))
@@ -402,6 +435,31 @@ func (g *groupHandler) handleGroupReply(c telebot.Context, contentType, text, fi
 	}
 
 	return nil
+}
+
+// downloadMedia downloads a file from Telegram by fileID and returns local path.
+func (g *groupHandler) downloadMedia(fileID string) (string, error) {
+	tmpDir := os.TempDir()
+	filename := tmpDir + fmt.Sprintf("/tg_media_%d_%s", time.Now().UnixNano(), fileID)
+
+	file := telebot.File{FileID: fileID}
+	reader, err := g.tb.File(&file)
+	if err != nil {
+		return "", fmt.Errorf("can't get file: %w", err)
+	}
+	defer reader.Close()
+
+	out, err := os.Create(filename)
+	if err != nil {
+		return "", fmt.Errorf("can't create file: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, reader); err != nil {
+		return "", fmt.Errorf("can't save file: %w", err)
+	}
+
+	return filename, nil
 }
 
 // runCleanup periodically removes expired requests.

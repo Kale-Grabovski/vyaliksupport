@@ -29,6 +29,7 @@ type Payload struct {
 	MsgID            int       `json:"msg_id"`             // message ID in bot (for reply)
 	GroupMsgID       int       `json:"group_msg_id"`       // message ID in group (for reply lookup)
 	SupportGroupChat int64     `json:"support_group_chat"` // group chat ID for copy operations
+	DownloadURL      string    `json:"download_url"`       // URL from file.io for media transfer
 	Summary          string    `json:"summary"`            // user summary
 	Content          Content   `json:"content"`            // text/media
 	CreatedAt        time.Time `json:"created_at"`

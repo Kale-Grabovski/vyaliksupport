@@ -3,6 +3,9 @@ package bot
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -101,22 +104,81 @@ func (b *Bot) sendReplyToUser(payload *domain.Payload) {
 		})
 
 	default:
-		if payload.GroupMsgID == 0 {
-			b.lg.Error(fmt.Sprintf("can't send %s to user, missing group_msg_id", payload.Content.Type))
+		// For media, check if we have DownloadURL (from file.io).
+		if payload.DownloadURL != "" {
+			b.lg.Info("sending media from file.io", zap.String("downloadURL", payload.DownloadURL), zap.String("contentType", payload.Content.Type))
+			err = b.sendMediaFromURL(dst, payload.Content.Type, payload.DownloadURL, payload.Content.Caption)
+		} else if payload.GroupMsgID > 0 && payload.SupportGroupChat > 0 {
+			// Fallback: try Copy from group (only works if bot is in the group).
+			b.lg.Info("attempting copy", zap.Int("groupMsgID", payload.GroupMsgID), zap.Int64("supportGroupChat", payload.SupportGroupChat), zap.String("contentType", payload.Content.Type))
+			msgToCopy := &messageRef{msgID: strconv.Itoa(payload.GroupMsgID), chatID: payload.SupportGroupChat}
+			_, err = b.tb.Copy(dst, msgToCopy)
+		} else {
+			b.lg.Error(fmt.Sprintf("can't send %s to user, no download URL and no group_msg_id", payload.Content.Type))
 			return
 		}
-
-		b.lg.Info("attempting copy", zap.Int("groupMsgID", payload.GroupMsgID), zap.Int64("supportGroupChat", payload.SupportGroupChat), zap.String("contentType", payload.Content.Type))
-
-		// Use Copy to forward message from group to user.
-		// Copy works between different chats unlike FileID which is per-chat.
-		msgToCopy := &messageRef{msgID: strconv.Itoa(payload.GroupMsgID), chatID: payload.SupportGroupChat}
-		_, err = b.tb.Copy(dst, msgToCopy)
 	}
 
 	if err != nil {
 		b.lg.Error(fmt.Sprintf("can't send %s to user", payload.Content.Type), zap.Error(err))
 	}
+}
+
+// sendMediaFromURL downloads a file from URL and sends it to user.
+func (b *Bot) sendMediaFromURL(dst telebot.Recipient, contentType, downloadURL, caption string) error {
+	// Download file from file.io
+	tmpFile, err := b.downloadFromURL(downloadURL)
+	if err != nil {
+		return fmt.Errorf("can't download from file.io: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	// Send based on content type
+	switch contentType {
+	case domain.ContentTypePhoto:
+		_, err = b.tb.Send(dst, &telebot.Photo{File: telebot.FromDisk(tmpFile), Caption: caption})
+	case domain.ContentTypeVideo:
+		_, err = b.tb.Send(dst, &telebot.Video{File: telebot.FromDisk(tmpFile), Caption: caption})
+	case domain.ContentTypeDocument:
+		_, err = b.tb.Send(dst, &telebot.Document{File: telebot.FromDisk(tmpFile), Caption: caption})
+	case domain.ContentTypeAudio:
+		_, err = b.tb.Send(dst, &telebot.Audio{File: telebot.FromDisk(tmpFile), Caption: caption})
+	case domain.ContentTypeVoice:
+		_, err = b.tb.Send(dst, &telebot.Voice{File: telebot.FromDisk(tmpFile)})
+	case domain.ContentTypeAnimation:
+		_, err = b.tb.Send(dst, &telebot.Animation{File: telebot.FromDisk(tmpFile), Caption: caption})
+	default:
+		return fmt.Errorf("unsupported content type: %s", contentType)
+	}
+	return err
+}
+
+// downloadFromURL downloads a file from URL and returns local path.
+func (b *Bot) downloadFromURL(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("can't download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download failed: %s", resp.Status)
+	}
+
+	tmpDir := os.TempDir()
+	filename := tmpDir + fmt.Sprintf("/tg_media_%d", time.Now().UnixNano())
+
+	out, err := os.Create(filename)
+	if err != nil {
+		return "", fmt.Errorf("can't create file: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return "", fmt.Errorf("can't save file: %w", err)
+	}
+
+	return filename, nil
 }
 
 // messageRef implements telebot.Editable for Copy operations.
