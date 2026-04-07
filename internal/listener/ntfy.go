@@ -17,6 +17,13 @@ import (
 	"go.uber.org/zap"
 )
 
+type ntfyMessage struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+	Event   string `json:"event"`
+	Time    int64  `json:"time"`
+}
+
 type NtfyListener struct {
 	client      *http.Client
 	baseURL     string
@@ -76,45 +83,45 @@ func (l *NtfyListener) Stop() {
 }
 
 func (l *NtfyListener) poll(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	var lastMessageID string
-
 	for {
 		select {
 		case <-ctx.Done():
-			l.stop()
 			return
 		case <-l.stopChan:
-			l.stop()
 			return
-		case <-ticker.C:
-			if err := l.fetchMessages(ctx, lastMessageID); err != nil {
-				l.lg.Error("failed to fetch ntfy messages", zap.Error(err))
+		default:
+			// reconnect on error with backoff
+			if err := l.stream(ctx); err != nil {
+				l.lg.Error("ntfy stream error, reconnecting", zap.Error(err))
+				select {
+				case <-time.After(5 * time.Second):
+				case <-ctx.Done():
+					return
+				case <-l.stopChan:
+					return
+				}
 			}
 		}
 	}
 }
 
-func (l *NtfyListener) fetchMessages(ctx context.Context, since string) error {
-	url := l.baseURL + "/" + l.topic + "/json"
-	if since != "" {
-		url += "?since=" + since
-	}
-
+func (l *NtfyListener) stream(ctx context.Context) error {
+	// Use ?poll=1 for one-shot or just /json for a persistent stream.
+	// Add since=all or since=<unix_timestamp> to avoid replaying old messages!
+	url := fmt.Sprintf("%s/%s/json?since=%d", l.baseURL, l.topic, time.Now().Unix())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
-
 	if l.token != "" {
 		req.Header.Set("Authorization", "Bearer "+l.token)
 	}
 
-	resp, err := l.client.Do(req)
+	// NO timeout on the client for streaming — use context cancellation instead
+	streamClient := &http.Client{}
+	resp, err := streamClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("ntfy request: %w", err)
+		return fmt.Errorf("ntfy connect: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -123,16 +130,28 @@ func (l *NtfyListener) fetchMessages(ctx context.Context, since string) error {
 		return fmt.Errorf("ntfy bad status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
-	var messages []ntfyMessage
-	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
-		return fmt.Errorf("decode messages: %w", err)
-	}
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		// Check for cancellation between messages
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-l.stopChan:
+			return nil
+		default:
+		}
 
-	for _, msg := range messages {
-		l.processMessage(&msg)
-	}
+		var msg ntfyMessage
+		if err := decoder.Decode(&msg); err != nil {
+			// EOF means server closed connection — reconnect
+			return fmt.Errorf("stream decode: %w", err)
+		}
 
-	return nil
+		if msg.Event == "message" {
+			l.processMessage(&msg)
+		}
+		// "open" and "keepalive" events are silently ignored
+	}
 }
 
 func (l *NtfyListener) processMessage(msg *ntfyMessage) {
@@ -187,10 +206,4 @@ func (l *NtfyListener) stop() {
 		close(l.messageChan)
 		l.messageChan = make(chan *domain.Payload, 100)
 	}
-}
-
-type ntfyMessage struct {
-	ID      string `json:"id"`
-	Message string `json:"message"`
-	Time    int64  `json:"time"`
 }
