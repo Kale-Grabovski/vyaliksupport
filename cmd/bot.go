@@ -56,12 +56,6 @@ func runBot(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	repo := postgres.NewReq(db, cfg.Bot.SubHost)
-	if err = repo.Migrate(); err != nil {
-		lg.Error("can't migrate", zap.Error(err))
-		return err
-	}
-
 	// Initialize Ntfy sender (to group) and listener (from group).
 	ntfySender := sender.NewNtfySender(cfg.Ntfy.TopicGroupToUser, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey)
 	ntfyListener := listener.NewNtfyListener(cfg.Ntfy.TopicUserToGroup, cfg.Ntfy.Token, cfg.Ntfy.EncryptKey, lg)
@@ -75,6 +69,7 @@ func runBot(cmd *cobra.Command, args []string) error {
 	}
 	defer ntfyListener.Stop()
 
+	repo := postgres.NewReq(db, cfg.Bot.SubHost)
 	b := bot.New(tb, cfg, repo, ntfySender, lg)
 
 	// Handle incoming messages from ntfy (replies from group).

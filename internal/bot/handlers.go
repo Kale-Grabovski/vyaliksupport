@@ -276,7 +276,7 @@ func (b *Bot) handleUserMessage(c telebot.Context) error {
 	// we'll use the original message ID as a reference.
 	// The group handler will store the user_chat_id -> original_msg_id mapping.
 	// Actually, we need to save the user's message ID so the group can reference it.
-	if err := b.repo.SaveRequest(int(msg.ID), msg.Chat.ID); err != nil {
+	if err := b.repo.SaveRequest(msg.ID, msg.Chat.ID); err != nil {
 		b.lg.Error("can't save support request", zap.Error(err))
 	}
 

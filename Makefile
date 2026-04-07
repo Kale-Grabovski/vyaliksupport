@@ -13,6 +13,8 @@ build:
 upload:
 	make build && rsync -av bot vpn@xvpnnl:~/bot/ && \
 	ssh vpn@xvpnnl sudo supervisorctl restart {notify,group} && \
+	rsync -av support vpn@vpngate:~/sup/ && \
+	ssh vpn@vpngate sudo supervisorctl restart sup && \
 	rm {bot,support}
 
 upload-prod:

@@ -87,11 +87,11 @@ func (d *Req) Migrate() error {
 	queries := []string{
 		`DROP TABLE IF EXISTS tg_support_requests`,
 		`CREATE TABLE IF NOT EXISTS tg_support_requests (
-			id SERIAL PRIMARY KEY,
-			support_message_id INTEGER NOT NULL,
-			user_chat_id BIGINT NOT NULL,
-			created_at TIMESTAMPTZ DEFAULT NOW(),
-			expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '72 hours')
+			id bigserial PRIMARY KEY,
+			support_message_id bigint NOT NULL,
+			user_chat_id bigint NOT NULL,
+			created_at timestamptz DEFAULT NOW(),
+			expires_at timestamptz NOT NULL DEFAULT (NOW() + INTERVAL '72 hours')
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_support_message_id ON tg_support_requests(support_message_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_chat_id ON tg_support_requests(user_chat_id)`,
