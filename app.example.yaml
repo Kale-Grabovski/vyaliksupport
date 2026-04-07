@@ -13,7 +13,7 @@ db:
 
 ntfy:
   token: tk_xxx                   # ntfy access token (optional)
-  encrypt_key: "your-32-byte-key-here!!!!" # 32-byte key for AES-256 (optional)
+  encrypt_key: "your-32-byte-key-here!!!!" # 32-byte key for AES-256, openssl rand -base64 32
   topic_user_to_group: your_topic_user_to_group   # user -> group (bot sends here)
   topic_group_to_user: your_topic_group_to_user   # group -> user (bot listens here)
   topic_notifications: your_topic_notifications   # notify service
