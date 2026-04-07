@@ -3,7 +3,6 @@ package postgres
 import (
 	"database/sql"
 	"fmt"
-	"time"
 
 	"vyaliksupport/internal/domain"
 
@@ -20,7 +19,7 @@ func NewReq(db *sqlx.DB, subHost string) *Req {
 }
 
 func (d *Req) SaveRequest(supportMessageID int, userChatID int64) error {
-	return d.SaveRequestWithTTL(supportMessageID, userChatID, 72*time.Hour)
+	return d.SaveRequestWithTTL(supportMessageID, userChatID)
 }
 
 func (d *Req) FindUserChatID(supportMessageID int) (userChatID int64, err error) {
@@ -90,8 +89,8 @@ func (d *Req) Migrate() error {
 			id bigserial PRIMARY KEY,
 			support_message_id bigint NOT NULL,
 			user_chat_id bigint NOT NULL,
-			created_at timestamptz DEFAULT NOW(),
-			expires_at timestamptz NOT NULL DEFAULT (NOW() + INTERVAL '72 hours')
+			created_at timestamptz DEFAULT now(),
+			expires_at timestamptz NOT NULL DEFAULT now() + INTERVAL '72 hours'
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_support_message_id ON tg_support_requests(support_message_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_chat_id ON tg_support_requests(user_chat_id)`,
@@ -115,8 +114,8 @@ func (d *Req) Cleanup() (int64, error) {
 }
 
 // SaveRequestWithTTL creates a new request with a specific TTL.
-func (d *Req) SaveRequestWithTTL(supportMessageID int, userChatID int64, ttl time.Duration) error {
-	query := "INSERT INTO tg_support_requests (support_message_id, user_chat_id, expires_at) VALUES ($1, $2, NOW() + $3)"
-	_, err := d.db.Exec(query, supportMessageID, userChatID, ttl)
+func (d *Req) SaveRequestWithTTL(supportMessageID int, userChatID int64) error {
+	query := "INSERT INTO tg_support_requests (support_message_id, user_chat_id) VALUES ($1, $2)"
+	_, err := d.db.Exec(query, supportMessageID, userChatID)
 	return err
 }
