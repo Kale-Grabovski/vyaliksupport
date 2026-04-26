@@ -1,0 +1,12 @@
+services:
+  support:
+    build: .
+    container_name: support
+    restart: unless-stopped
+    networks:
+      - remnawave-network
+
+networks:
+  remnawave-network:
+    external: true
+    name: remnawave-network
