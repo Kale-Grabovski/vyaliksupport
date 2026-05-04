@@ -11,6 +11,6 @@ build-unencrypt:
 	GOOS=linux GOARCH=amd64 garble -tiny -literals build -o support .
 
 upload:
-	make build && rsync -av support vpn@vpngate:~/support/ && \
-	ssh vpn@vpngate sudo supervisorctl restart support && \
+	make build && rsync -av -e "ssh -p 14888" support vpn@vpngate:~/support/ && \
+	ssh -p 14888 vpn@vpngate sudo supervisorctl restart support && \
 	rm support
