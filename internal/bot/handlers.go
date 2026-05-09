@@ -181,7 +181,7 @@ func (b *Bot) forwardContentToUser(userChatID int64, msg *telebot.Message) error
 	switch {
 	case msg.Text != "":
 		_, err := b.tb.Send(dst, msg.Text, &telebot.SendOptions{
-			ParseMode: telebot.ModeMarkdown,
+			ParseMode: telebot.ModeHTML,
 		})
 		return err
 
