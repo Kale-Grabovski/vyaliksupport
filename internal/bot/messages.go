@@ -9,10 +9,10 @@ const (
 
 const (
 	// msgWelcome uses HTML parse mode — safe for any username with underscores.
-	msgWelcome = `Привет! Я бот поддержки <a href="https://t.me/kostervpnbot">KosterVPN</a>.
+	msgWelcome = `Здравствуйте, я бот поддержки <a href="https://t.me/kostervpnbot">KosterVPN</a>.
 
-Если у тебя вопрос — нажми на FAQ или опиши проблему текстом.
-Чем подробнее — тем быстрее поможем.`
+Пожалуйста, подробно опишите вашу проблему одним сообщением.
+Укажите ваше устройство (android/iphone/windows) и приложите скриншот с проблемой.`
 
 	msgFAQ = `*Часто задаваемые вопросы:*
 
@@ -20,7 +20,7 @@ const (
 
 	msgUnsupportedType = `📎 [Неподдерживаемый тип сообщения]`
 
-	msgSentToSupport = `✅ Сообщение поддержке отправлено. Ответим в ближайшее время.`
+	msgSentToSupport = `✅ Сообщение поддержке отправлено. Ожидайте.`
 
 	msgReplyNotFound = `❌ Не могу найти пользователя по этому сообщению`
 
@@ -28,7 +28,7 @@ const (
 
 	msgReplyUserBlocked = `❌ Не удалось отправить ответ пользователю. Возможно, он заблокировал бота.`
 
-	msgReplyHeader = `👨‍💻 Ответ из поддержки:`
+	msgReplyHeader = `💻 Пришел ответ из поддержки:`
 
 	clients = `
 • *Windows* — Happ / Hiddify

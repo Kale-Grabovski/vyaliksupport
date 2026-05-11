@@ -38,21 +38,21 @@ func (b *Bot) Stop() {
 // registerHandlers wires up all telebot endpoints.
 func (b *Bot) registerHandlers() {
 	b.tb.Handle("/start", b.handleStart)
-	b.tb.Handle("/faq", b.handleFAQ)
+	//b.tb.Handle("/faq", b.handleFAQ)
 
 	// FAQ inline button callbacks.
 	// telebot v4 resolves a callback by Btn.CallbackUnique() == "\f" + Unique.
 	// We pass a *Btn with only Unique set — Handle() only needs CallbackUnique(),
 	// the ReplyMarkup instance is irrelevant for registration.
-	for i := range faqItems {
-		idx := i
-		btn := &telebot.Btn{Unique: fmt.Sprintf("faq_%d", idx)}
-		b.tb.Handle(btn, b.handleFAQAnswer(idx))
-	}
+	//for i := range faqItems {
+	//	idx := i
+	//	btn := &telebot.Btn{Unique: fmt.Sprintf("faq_%d", idx)}
+	//	b.tb.Handle(btn, b.handleFAQAnswer(idx))
+	//}
 
 	// "Back to FAQ" inline button callback.
-	backBtn := &telebot.Btn{Unique: "faq_back"}
-	b.tb.Handle(backBtn, b.handleFAQBack)
+	//backBtn := &telebot.Btn{Unique: "faq_back"}
+	//b.tb.Handle(backBtn, b.handleFAQBack)
 
 	// All media types route through the same dispatcher.
 	for _, endpoint := range []interface{}{
@@ -74,16 +74,16 @@ func (b *Bot) registerHandlers() {
 // which would break Markdown parsing.
 func (b *Bot) handleStart(c telebot.Context) error {
 	return c.Send(msgWelcome, &telebot.SendOptions{
-		ParseMode:   telebot.ModeHTML,
-		ReplyMarkup: mainKeyboard(),
+		ParseMode: telebot.ModeHTML,
+		//ReplyMarkup: mainKeyboard(),
 	})
 }
 
 // handleFAQ sends the FAQ inline menu.
 func (b *Bot) handleFAQ(c telebot.Context) error {
 	return c.Send(msgFAQ, &telebot.SendOptions{
-		ParseMode:   telebot.ModeMarkdown,
-		ReplyMarkup: b.faqKeyboard(),
+		ParseMode: telebot.ModeMarkdown,
+		//ReplyMarkup: b.faqKeyboard(),
 	})
 }
 
@@ -109,8 +109,8 @@ func (b *Bot) handleFAQBack(c telebot.Context) error {
 	}
 	// Edit the current message to become the FAQ menu — no new message noise.
 	return c.Edit(msgFAQ, &telebot.SendOptions{
-		ParseMode:   telebot.ModeMarkdown,
-		ReplyMarkup: b.faqKeyboard(),
+		ParseMode: telebot.ModeMarkdown,
+		//ReplyMarkup: b.faqKeyboard(),
 	})
 }
 
@@ -129,8 +129,8 @@ func (b *Bot) handleMessage(c telebot.Context) error {
 		switch msg.Text {
 		case "/start", btnLabelHome:
 			return b.handleStart(c)
-		case "/faq", btnLabelFAQ:
-			return b.handleFAQ(c)
+			//case "/faq", btnLabelFAQ:
+			//	return b.handleFAQ(c)
 		}
 
 		// Regular user message — forward to support group.
