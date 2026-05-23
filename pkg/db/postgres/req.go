@@ -3,6 +3,7 @@ package postgres
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"vyaliksupport/internal/domain"
 
@@ -79,6 +80,8 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 		s.SubName = subName.String
 		s.SubExpire = expireAt.Time
 		s.SubKey = fmt.Sprintf("%s/%s", d.subHost, shortUUID.String)
+		s.SsSubKey = fmt.Sprintf("%s:1488/ss/%s", d.subHost, shortUUID.String)
+		s.SsSubKey = strings.Replace(s.SsSubKey, "sub.", "", -1)
 	}
 
 	return s, nil
