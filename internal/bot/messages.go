@@ -36,6 +36,12 @@ const (
 • *iOS* — Streisand / FoXray
 • *macOS* — Streisand / V2rayU / FoXray
 • *Linux* — Happ / Nekoray / Qv2ray`
+
+	// Ban/Unban messages are defined as string constants for use with fmt.Sprintf.
+	msgUserBanned   = "✅ Пользователь %d заблокирован."
+	msgBanFailed    = "❌ Не удалось заблокировать пользователя `%d`."
+	msgUserUnbanned = "✅ Пользователь %d разблокирован."
+	msgUnbanFailed  = "❌ Не удалось разблокировать пользователя `%d`."
 )
 
 // faqItem describes one FAQ entry shown as an inline button.

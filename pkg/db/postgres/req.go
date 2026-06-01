@@ -1,9 +1,11 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"vyaliksupport/internal/domain"
 
@@ -29,6 +31,40 @@ func (d *Req) FindUserChatID(supportMessageID int) (userChatID int64, err error)
 	query := "SELECT user_chat_id FROM tg_support_requests WHERE support_message_id = $1"
 	err = d.db.QueryRow(query, supportMessageID).Scan(&userChatID)
 	return
+}
+
+// IsUserBanned checks if a user is in the ban list.
+func (r *Req) IsUserBanned(tgID int64) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var exists bool
+	q := `SELECT EXISTS(SELECT 1 FROM tg_support_ban WHERE tg_id = $1)`
+	err := r.db.QueryRowContext(ctx, q, tgID).Scan(&exists)
+	if err != nil {
+		return false
+	}
+	return exists
+}
+
+// BanUser adds a user to the ban list.
+func (r *Req) BanUser(tgID int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	q := `INSERT INTO tg_support_ban (tg_id) VALUES ($1) ON CONFLICT (tg_id) DO NOTHING`
+	_, err := r.db.ExecContext(ctx, q, tgID)
+	return err
+}
+
+// UnbanUser removes a user from the ban list.
+func (r *Req) UnbanUser(tgID int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	q := `DELETE FROM tg_support_ban WHERE tg_id = $1`
+	_, err := r.db.ExecContext(ctx, q, tgID)
+	return err
 }
 
 // GetUserSummary collects all info about the user from the main DB.
@@ -97,6 +133,12 @@ func (d *Req) Migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_support_message_id ON tg_support_requests(support_message_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_chat_id ON tg_support_requests(user_chat_id)`,
+
+		`CREATE TABLE IF NOT EXISTS tg_support_ban (
+			id serial PRIMARY KEY,
+			tg_id bigint NOT NULL UNIQUE,
+			created_at timestamptz(0) DEFAULT now()
+		)`,
 	}
 	for _, q := range queries {
 		if _, err := d.db.Exec(q); err != nil {

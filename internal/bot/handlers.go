@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 	"gopkg.in/telebot.v4"
@@ -127,6 +128,11 @@ func (b *Bot) handleMessage(c telebot.Context) error {
 	}
 
 	if msg.Chat.ID != b.cfg.Bot.GroupID {
+		// Check if user is banned - don't accept messages from banned users.
+		if b.repo.IsUserBanned(msg.Chat.ID) {
+			return nil
+		}
+
 		switch msg.Text {
 		case "/start", btnLabelHome:
 			return b.handleStart(c)
@@ -151,6 +157,34 @@ func (b *Bot) handleGroupReply(c telebot.Context) error {
 		return nil
 	}
 
+	// Check if this is a /unban command.
+	if containsSubstring(msg.Text, "/unban") || containsSubstring(msg.Caption, "/unban") {
+		if err := b.repo.UnbanUser(userChatID); err != nil {
+			b.lg.Error("can't unban user", zap.Int64("userChatID", userChatID), zap.Error(err))
+			b.sendToGroup(fmt.Sprintf(msgUnbanFailed, userChatID))
+			return nil
+		}
+		b.sendToGroup(fmt.Sprintf(msgUserUnbanned, userChatID))
+		return nil
+	}
+
+	// Check if this is a /ban command.
+	if containsSubstring(msg.Text, "/ban") || containsSubstring(msg.Caption, "/ban") {
+		if err := b.repo.BanUser(userChatID); err != nil {
+			b.lg.Error("can't ban user", zap.Int64("userChatID", userChatID), zap.Error(err))
+			b.sendToGroup(fmt.Sprintf(msgBanFailed, userChatID))
+			return nil
+		}
+		b.sendToGroup(fmt.Sprintf(msgUserBanned, userChatID))
+
+		msg.Text = strings.TrimSpace(strings.ReplaceAll(msg.Text, "/ban", ""))
+		msg.Caption = strings.TrimSpace(strings.ReplaceAll(msg.Caption, "/ban", ""))
+		if msg.Text == "" && msg.Caption == "" {
+			return nil
+		}
+	}
+
+	// Regular reply — forward to user normally.
 	// Send the header message first so the user knows a reply is coming.
 	if _, err = b.tb.Send(telebot.ChatID(userChatID), msgReplyHeader); err != nil {
 		b.lg.Error("can't send reply header to user",
@@ -173,6 +207,14 @@ func (b *Bot) handleGroupReply(c telebot.Context) error {
 
 	b.sendToGroup(msgReplySentOK)
 	return nil
+}
+
+// containsSubstring checks if s contains substr (nil-safe).
+func containsSubstring(s, substr string) bool {
+	if s == "" {
+		return false
+	}
+	return strings.Contains(s, substr)
 }
 
 // forwardContentToUser sends the correct media type to the user.
