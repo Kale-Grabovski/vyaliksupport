@@ -61,8 +61,8 @@ func (s *UserSummary) Format() string {
 			"🎁 Пробный: %s\n"+
 			"🐷 Истекла: %s\n"+
 			"🔐 %s\n"+
-			"🔐 `%s`\n"+
-			"🔐 `%s`",
+			"`%s`\n"+
+			"`%s`",
 		username,
 		s.TgID,
 		s.JoinedAt.Format("02.01.2006"),
