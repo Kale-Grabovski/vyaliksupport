@@ -123,7 +123,7 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 		s.SsSubKey = fmt.Sprintf("%s:1488/ss/%s", d.subHost, shortUUID.String)
 		s.SsSubKey = strings.Replace(s.SsSubKey, "sub.", "", -1)
 
-		cf := strings.Replace(d.subHost, "https://", "", -1)
+		cf := strings.Replace(strings.Replace(d.subHost, "sub.", "", -1), "https://", "", -1)
 		s.CfSubKey = fmt.Sprintf("https://sbb.%s/ss/%s", cf, shortUUID.String)
 	}
 
