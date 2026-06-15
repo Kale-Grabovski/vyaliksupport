@@ -83,18 +83,21 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 			coalesce((
 				SELECT tx_id
 				FROM tg_payments
-				WHERE tg_id = $1 AND status = 'ok' AND payment_system = 'platega'
+				WHERE tg_id = $1 AND status = 'ok'
 				ORDER BY created_at DESC
 				LIMIT 1
-			), '') AS last_tx_id
+			), '') AS last_tx_id,
+			coalesce(sum(ut.used_traffic_bytes), 0) AS used_traffic_bytes
 		FROM tg_users AS u
-		LEFT JOIN tg_payments AS p
-			ON p.tg_id = u.tg_id AND p.status = 'ok' AND p.paid_amount > 0
+		LEFT JOIN tg_payments AS p ON p.tg_id = u.tg_id AND p.status = 'ok' AND p.paid_amount > 0
+		LEFT JOIN users AS uu ON uu.telegram_id = u.tg_id
+		LEFT JOIN user_traffic AS ut ON ut.t_id = uu.t_id
 		WHERE u.tg_id = $1
 		GROUP BY u.username, u.created_at, u.balance, u.used_test
 	`, tgID)
 
-	err := row.Scan(&s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest, &s.PayCount, &s.PaySum, &s.LastTxID)
+	err := row.Scan(&s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest,
+		&s.PayCount, &s.PaySum, &s.LastTxID, &s.Traffic)
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
@@ -116,8 +119,12 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 		s.SubName = subName.String
 		s.SubExpire = expireAt.Time
 		s.SubKey = fmt.Sprintf("%s/%s", d.subHost, shortUUID.String)
+
 		s.SsSubKey = fmt.Sprintf("%s:1488/ss/%s", d.subHost, shortUUID.String)
 		s.SsSubKey = strings.Replace(s.SsSubKey, "sub.", "", -1)
+
+		cf := strings.Replace(d.subHost, "https://", "", -1)
+		s.CfSubKey = fmt.Sprintf("https://sbb.%s/ss/%s", cf, shortUUID.String)
 	}
 
 	return s, nil
