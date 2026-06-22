@@ -68,12 +68,13 @@ func (r *Req) UnbanUser(tgID int64) error {
 }
 
 // GetUserSummary collects all info about the user from the main DB.
-func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
-	s := &domain.UserSummary{TgID: tgID}
+func (r *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
+	s := &domain.UserSummary{}
 
 	// Base user info + payment stats in one query.
-	row := d.db.QueryRow(`
+	row := r.db.QueryRow(`
 		SELECT
+		    u.tg_id,
 			coalesce(u.username, ''),
 			u.created_at,
 			u.balance,
@@ -87,27 +88,29 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 				ORDER BY created_at DESC
 				LIMIT 1
 			), '') AS last_tx_id,
-			coalesce(sum(ut.used_traffic_bytes), 0) AS used_traffic_bytes
+			(
+				SELECT coalesce(sum(used_traffic_bytes), 0)
+				FROM user_traffic
+				WHERE t_id IN (SELECT t_id FROM users WHERE telegram_id = u.tg_id)
+			) AS used_traffic_bytes
 		FROM tg_users AS u
 		LEFT JOIN tg_payments AS p ON p.tg_id = u.tg_id AND p.status = 'ok' AND p.paid_amount > 0
 		LEFT JOIN users AS uu ON uu.telegram_id = u.tg_id
-		LEFT JOIN user_traffic AS ut ON ut.t_id = uu.t_id
 		WHERE u.tg_id = $1
-		GROUP BY u.username, u.created_at, u.balance, u.used_test
+		GROUP BY u.tg_id, u.username, u.created_at, u.balance, u.used_test
 	`, tgID)
 
-	err := row.Scan(&s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest,
+	err := row.Scan(&s.TgID, &s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest,
 		&s.PayCount, &s.PaySum, &s.LastTxID, &s.Traffic)
 	if err != nil {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 
-	// Active subscription (most recent non-expired, unlimited traffic only).
 	var shortUUID sql.NullString
 	var subName sql.NullString
 	var expireAt sql.NullTime
 
-	err = d.db.QueryRow(`
+	err = r.db.QueryRow(`
 		SELECT short_uuid, username, expire_at, expire_at < now()
 		FROM users
 		WHERE telegram_id = $1
@@ -118,12 +121,12 @@ func (d *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 	if err == nil && shortUUID.Valid {
 		s.SubName = subName.String
 		s.SubExpire = expireAt.Time
-		s.SubKey = fmt.Sprintf("%s/%s", d.subHost, shortUUID.String)
+		s.SubKey = fmt.Sprintf("%s/%s", r.subHost, shortUUID.String)
 
-		s.SsSubKey = fmt.Sprintf("%s:1488/ss/%s", d.subHost, shortUUID.String)
+		s.SsSubKey = fmt.Sprintf("%s:1488/ss/%s", r.subHost, shortUUID.String)
 		s.SsSubKey = strings.Replace(s.SsSubKey, "sub.", "", -1)
 
-		cf := strings.Replace(strings.Replace(d.subHost, "sub.", "", -1), "https://", "", -1)
+		cf := strings.Replace(strings.Replace(r.subHost, "sub.", "", -1), "https://", "", -1)
 		s.CfSubKey = fmt.Sprintf("https://sbb.%s/ss/%s", cf, shortUUID.String)
 	}
 
