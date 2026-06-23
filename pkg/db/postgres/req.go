@@ -74,17 +74,25 @@ func (r *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 	// Base user info + payment stats in one query.
 	row := r.db.QueryRow(`
 		SELECT
-		    u.tg_id,
+			u.tg_id,
 			coalesce(u.username, ''),
 			u.created_at,
 			u.balance,
 			u.used_test,
-			count(p.id) AS pay_count,
-			coalesce(sum(p.paid_amount), 0) AS pay_sum,
+			(
+				SELECT count(id)
+				FROM tg_payments
+				WHERE tg_id = u.tg_id AND status = 'ok' AND paid_amount > 0
+			) AS pay_count,
+			(
+				SELECT coalesce(sum(paid_amount), 0)
+				FROM tg_payments
+				WHERE tg_id = u.tg_id AND status = 'ok' AND paid_amount > 0
+			) AS pay_sum,
 			coalesce((
 				SELECT tx_id
 				FROM tg_payments
-				WHERE tg_id = $1 AND status = 'ok'
+				WHERE tg_id = u.tg_id AND status = 'ok'
 				ORDER BY created_at DESC
 				LIMIT 1
 			), '') AS last_tx_id,
@@ -94,10 +102,7 @@ func (r *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 				WHERE t_id IN (SELECT t_id FROM users WHERE telegram_id = u.tg_id)
 			) AS used_traffic_bytes
 		FROM tg_users AS u
-		LEFT JOIN tg_payments AS p ON p.tg_id = u.tg_id AND p.status = 'ok' AND p.paid_amount > 0
-		LEFT JOIN users AS uu ON uu.telegram_id = u.tg_id
 		WHERE u.tg_id = $1
-		GROUP BY u.tg_id, u.username, u.created_at, u.balance, u.used_test
 	`, tgID)
 
 	err := row.Scan(&s.TgID, &s.Username, &s.JoinedAt, &s.Balance, &s.UsedTest,
