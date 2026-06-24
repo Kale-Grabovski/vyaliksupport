@@ -37,11 +37,11 @@ const (
 	msgReplyHeader = `👨‍💻 Ответ из поддержки:`
 
 	clients = `
-• *Windows* — Happ / Hiddify
-• *Android* — Happ / V2rayNG
-• *iOS* — Streisand / FoXray
-• *macOS* — Streisand / V2rayU / FoXray
-• *Linux* — Happ / Nekoray / Qv2ray`
+• *Windows* — INCY / Happ / Hiddify
+• *Android* — INCY / Happ / V2rayNG
+• *iOS* — INCY / V2Ray Client / FoXray
+• *macOS* — INCY / Happ / Streisand / V2rayU / FoXray
+• *Linux* — INCY / Happ / Nekoray / Qv2ray`
 
 	// Ban/Unban messages are defined as string constants for use with fmt.Sprintf.
 	msgUserBanned   = "✅ Пользователь %d заблокирован."
