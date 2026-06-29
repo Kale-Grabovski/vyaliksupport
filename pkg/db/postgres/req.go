@@ -128,9 +128,6 @@ func (r *Req) GetUserSummary(tgID int64) (*domain.UserSummary, error) {
 		s.SubExpire = expireAt.Time
 		s.SubKey = fmt.Sprintf("%s/%s", r.subHost, shortUUID.String)
 
-		s.SsSubKey = fmt.Sprintf("%s:1488/ss/%s", r.subHost, shortUUID.String)
-		s.SsSubKey = strings.Replace(s.SsSubKey, "sub.", "", -1)
-
 		cf := strings.Replace(strings.Replace(r.subHost, "sub.", "", -1), "https://", "", -1)
 		s.CfSubKey = fmt.Sprintf("https://sbb.%s/ss/%s", cf, shortUUID.String)
 	}

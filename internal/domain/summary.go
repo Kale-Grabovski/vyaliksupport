@@ -17,8 +17,7 @@ type UserSummary struct {
 	PaySum    int
 	SubName   string
 	SubKey    string // full subscription URL
-	SsSubKey  string // full subscription 1488 URL
-	CfSubKey  string // cf subscription URL
+	CfSubKey  string // cf subscription URL, actual
 	LastTxID  string
 	Traffic   int64
 	SubExpire time.Time
@@ -42,8 +41,8 @@ func (s *UserSummary) Format() string {
 	}
 
 	sub := "нет"
-	if s.SubKey != "" {
-		sub = fmt.Sprintf("до %s, `%s`\n`%s`", s.SubExpire.Format("02.01.2006"), s.SubName, s.SubKey)
+	if s.CfSubKey != "" {
+		sub = fmt.Sprintf("до %s, `%s`\n`%s`", s.SubExpire.Format("02.01.2006"), s.SubName, s.CfSubKey)
 	}
 
 	last := ""
@@ -60,9 +59,7 @@ func (s *UserSummary) Format() string {
 			last+
 			"🎁 Пробный: %s\n"+
 			"🐷 Истекла: %s\n"+
-			"🔐 %s\n"+
-			"`%s`\n"+
-			"`%s`",
+			"🔐 %s",
 		username,
 		s.TgID,
 		s.JoinedAt.Format("02.01.2006"),
@@ -73,8 +70,6 @@ func (s *UserSummary) Format() string {
 		usedTest,
 		expired,
 		sub,
-		s.SsSubKey,
-		s.CfSubKey,
 	)
 }
 
